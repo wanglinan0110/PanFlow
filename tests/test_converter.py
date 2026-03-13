@@ -97,7 +97,7 @@ class ConverterTestCase(unittest.TestCase):
         self.assertEqual(command[0], "pandoc")
         self.assertIn("gfm+raw_html", command)
         self.assertIn("--reference-doc", command)
-        self.assertEqual(command[-1], "templates/reference.docx")
+        self.assertEqual(command[-1], str(Path("templates/reference.docx")))
 
     def test_cli_defaults_to_convert_when_subcommand_is_omitted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
