@@ -73,6 +73,34 @@ python3 scripts/build_app.py --mode onedir --pandoc-binary "$(which pandoc)"
 - 应用启动后会优先查找内置资源，所以打包后依然能命中 `examples/business.py`
 - 如果同时打包了 `pandoc`，应用会优先使用内置 `bin/pandoc`
 
+### GitHub tag 自动产出 exe
+
+仓库里现在带有 Windows 发布工作流：[release-windows.yml](/Users/wanglinan/Documents/huaru/AI/PanFlow/.github/workflows/release-windows.yml#L1)。
+
+当你推送形如 `v*` 的 tag 时，GitHub Actions 会自动：
+
+- 在 `windows-latest` 上安装 Python 3.11
+- 安装 `pandoc`
+- 执行测试
+- 用 `PyInstaller` 构建单文件版 `PanFlow.exe`
+- 把产物上传到对应的 GitHub Release
+
+常用发布命令：
+
+```bash
+git add .
+git commit -m "Add Windows release workflow"
+git tag v0.1.0
+git push origin main
+git push origin v0.1.0
+```
+
+发布完成后，你可以在 GitHub 的 Release 页面下载：
+
+```text
+PanFlow-v0.1.0-windows-x64.exe
+```
+
 ## 当前工作方式
 
 ### 1. Section 分发

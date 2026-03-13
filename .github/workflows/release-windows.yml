@@ -1,0 +1,69 @@
+name: Release Windows EXE
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Pandoc
+        shell: pwsh
+        run: choco install pandoc -y --no-progress
+
+      - name: Resolve Pandoc path
+        shell: pwsh
+        run: |
+          $pandoc = (Get-Command pandoc).Source
+          "PANDOC_BINARY=$pandoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[build]"
+
+      - name: Run test suite
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m unittest discover -s tests
+
+      - name: Build standalone executable
+        shell: pwsh
+        run: python scripts/build_app.py --mode onefile --name PanFlow --pandoc-binary "${env:PANDOC_BINARY}"
+
+      - name: Rename release asset
+        shell: pwsh
+        run: |
+          $assetName = "PanFlow-${{ github.ref_name }}-windows-x64.exe"
+          Move-Item -Path "dist/PanFlow.exe" -Destination "dist/$assetName"
+          "ASSET_NAME=$assetName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET_NAME }}
+          path: dist/${{ env.ASSET_NAME }}
+
+      - name: Publish GitHub release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ env.ASSET_NAME }}
+          generate_release_notes: true
