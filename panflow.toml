@@ -1,0 +1,12 @@
+[pandoc]
+binary = "pandoc"
+reference_doc = "templates/reference.docx"
+
+[renderers]
+1 = "src/panflow_service/renderers/testcase_table.py"
+callout = "src/panflow_service/renderers/callout.py"
+json_table = "src/panflow_service/renderers/testcase_table.py"
+metrics = "src/panflow_service/renderers/metrics.py"
+table = "src/panflow_service/renderers/testcase_table.py"
+testcase_table = "src/panflow_service/renderers/testcase_table.py"
+
