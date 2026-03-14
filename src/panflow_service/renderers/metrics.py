@@ -1,3 +1,5 @@
+"""两列表格形式的指标 renderer。"""
+
 RENDER_KEYS = ["metrics"]
 
 
@@ -6,6 +8,7 @@ from typing import Any
 
 
 def render(payload: Any, context: dict[str, object]) -> str:
+    # metrics 更偏展示型数据块，输出尽量紧凑，方便进 Word。
     if not isinstance(payload, dict):
         raise ValueError("metrics renderer expects a JSON object.")
 

@@ -1,3 +1,8 @@
+"""PyInstaller 打包脚本。
+
+负责把 CLI、模板资源、renderers 以及可选的 pandoc 一起封装成可分发应用。
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -7,6 +12,7 @@ import sys
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # 打包只暴露三个核心维度：应用名、打包模式、是否内置 pandoc。
     parser = argparse.ArgumentParser(description="Build a standalone PanFlow application with PyInstaller.")
     parser.add_argument("--name", default="PanFlow", help="Application name. Default: PanFlow.")
     parser.add_argument(
@@ -32,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     renderers_dir = project_root / "src" / "panflow_service" / "renderers"
     pyinstaller = _resolve_pyinstaller()
 
+    # 统一在这里拼装 PyInstaller 命令，确保源码资源和运行时资源一起打包。
     command = [
         sys.executable,
         "-m",
@@ -57,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
 
     if args.pandoc_binary is not None:
+        # 如果显式传入 pandoc，就把它放到应用内置的 bin/ 目录里。
         command.extend(
             [
                 "--add-binary",
@@ -82,11 +90,13 @@ def _resolve_pyinstaller() -> str:
 
 
 def _add_data_arg(source: Path, target: str) -> str:
+    # PyInstaller 在 Windows 和 POSIX 上的数据参数分隔符不同。
     separator = ";" if sys.platform.startswith("win") else ":"
     return f"{source}{separator}{target}"
 
 
 def _target_path(project_root: Path, name: str, mode: str) -> Path:
+    # onefile 模式输出单文件，onedir 模式输出目录。
     dist_dir = project_root / "dist"
     if mode == "onefile":
         suffix = ".exe" if sys.platform.startswith("win") else ""

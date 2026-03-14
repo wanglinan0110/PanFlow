@@ -1,3 +1,5 @@
+"""模板脚本常用的 HTML 与返回结果辅助函数。"""
+
 from __future__ import annotations
 
 from html import escape
@@ -12,7 +14,7 @@ def build_document_result(
     font_size: str | None = None,
     input_format: str = "html",
 ) -> dict[str, str]:
-    """Build a standard companion-processor result payload."""
+    """构造 companion 脚本统一返回协议。"""
 
     result: dict[str, str] = {
         "content": content,
@@ -39,6 +41,7 @@ def render_heading(
     text_align: str | None = None,
     line_height: str | None = None,
 ) -> str:
+    # 标题本质上也是一个带内联样式的 HTML block，这里只是包了一层语义化入口。
     tag = f"h{level}"
     return render_html_block(
         tag,
@@ -61,6 +64,7 @@ def render_html_block(
     text_align: str | None = None,
     line_height: str | None = None,
 ) -> str:
+    # 所有文本内容都会先 escape，避免模板脚本误把原始文本当作 HTML 注入。
     style = build_inline_style(
         font_family=font_family,
         font_size=font_size,
@@ -91,6 +95,7 @@ def build_inline_style(
     table_layout: str | None = None,
     background_color: str | None = None,
 ) -> str:
+    # 把常用样式参数统一组装成一段行内 style 字符串，供各个 renderer 复用。
     styles: list[str] = []
     if font_family:
         styles.append(f"font-family: {font_family};")

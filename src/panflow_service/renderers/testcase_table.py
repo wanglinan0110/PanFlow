@@ -1,3 +1,5 @@
+"""复杂测试用例表格 renderer。"""
+
 RENDER_KEYS = ["1", "table", "testcase_table", "json_table"]
 
 
@@ -9,6 +11,7 @@ from panflow_service.companion import build_inline_style
 
 
 def render(payload: Any, context: dict[str, object]) -> str:
+    # 这里把结构化 JSON 转成带完整内联样式的 HTML 表格。
     if not isinstance(payload, dict):
         raise ValueError("testcase_table renderer expects a JSON object.")
 
@@ -39,6 +42,7 @@ def render(payload: Any, context: dict[str, object]) -> str:
 
 
 def _render_colgroup(colgroup: list[Any]) -> str:
+    # colgroup 直接决定 Word 最终列宽，所以尽量保留原始宽度信息。
     if not colgroup:
         return ""
 
@@ -50,6 +54,7 @@ def _render_colgroup(colgroup: list[Any]) -> str:
 
 
 def _render_row(row: Any, table_style: dict[str, Any]) -> str:
+    # 每一行继续下发到 cell 级别，保证表格级样式和单元格级样式都能叠加。
     if not isinstance(row, list):
         raise ValueError("Each row must be a list.")
 
@@ -58,6 +63,7 @@ def _render_row(row: Any, table_style: dict[str, Any]) -> str:
 
 
 def _render_cell(cell: Any, table_style: dict[str, Any]) -> str:
+    # cell 允许覆盖表格级默认样式，是业务脚本控制细节的主要入口。
     if not isinstance(cell, dict):
         raise ValueError("Each cell must be an object.")
 
@@ -96,6 +102,7 @@ def _render_cell(cell: Any, table_style: dict[str, Any]) -> str:
 
 
 def _render_table_style_attr(table_style: dict[str, Any]) -> str:
+    # 表格级样式负责兜底字体、宽度、边框和整体布局。
     inline_style = build_inline_style(
         font_family=str(table_style["font_family"]) if "font_family" in table_style else None,
         font_size=str(table_style["font_size"]) if "font_size" in table_style else None,
@@ -120,6 +127,7 @@ def _pick_style_value(
     table_style: dict[str, Any],
     key: str,
 ) -> str | None:
+    # 单元格优先级高于表格默认值。
     if key in cell and cell[key] is not None:
         return str(cell[key])
     if key in table_style and table_style[key] is not None:

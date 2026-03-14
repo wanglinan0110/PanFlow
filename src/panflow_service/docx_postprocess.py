@@ -1,3 +1,8 @@
+"""HTML 表格样式回填到 Word XML。
+
+pandoc 对复杂表格 CSS 的支持有限，这个模块负责把关键样式写回真正的 docx 结构。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,6 +16,7 @@ WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W = f"{{{WORD_NAMESPACE}}}"
 
 
+# 下面这些 dataclass 是“从 HTML 样式抽出的中间表示”，便于后续映射到 Word XML。
 @dataclass(frozen=True)
 class BorderSpec:
     value: str
@@ -76,6 +82,7 @@ class BlockSpec:
 
 
 def apply_html_table_styles_to_docx(html: str, docx_path: Path) -> bool:
+    # 总入口：先从 HTML 抽取块样式，再把对应样式写回 `word/document.xml`。
     block_specs = _extract_block_specs(html)
     if not block_specs:
         return False
@@ -96,6 +103,7 @@ def apply_html_table_styles_to_docx(html: str, docx_path: Path) -> bool:
 
 
 def _extract_block_specs(html: str) -> list[BlockSpec]:
+    # 给 HTML 包一层根节点，便于用 XML 方式递归解析。
     wrapped = f"<root>{html}</root>"
     root = ET.fromstring(wrapped)
     blocks: list[BlockSpec] = []
@@ -104,6 +112,7 @@ def _extract_block_specs(html: str) -> list[BlockSpec]:
 
 
 def _collect_block_specs(node: ET.Element, blocks: list[BlockSpec]) -> None:
+    # 这里只收集与 Word 样式映射直接相关的 block：表格和段落类标签。
     for child in list(node):
         if child.tag == "table":
             blocks.append(BlockSpec(kind="table", table=_extract_table_spec(child)))
@@ -127,6 +136,7 @@ def _collect_block_specs(node: ET.Element, blocks: list[BlockSpec]) -> None:
 
 
 def _extract_table_spec(table: ET.Element) -> TableStyleSpec:
+    # 表格样式既有 table 级默认值，也可能被 tr / td 再覆盖。
     table_style = _parse_style_map(table.get("style", ""))
     rows: list[RowStyleSpec] = []
     for row in _iter_rows(table):
@@ -181,6 +191,7 @@ def _iter_rows(table: ET.Element) -> list[ET.Element]:
 
 
 def _apply_block_specs_to_document_xml(document_xml: bytes, block_specs: list[BlockSpec]) -> bytes:
+    # HTML 块和 Word XML 块按顺序对齐，只在类型匹配时写入样式。
     _register_namespaces(document_xml)
     root = ET.fromstring(document_xml)
     body = root.find(f"{W}body")
@@ -211,6 +222,7 @@ def _apply_block_specs_to_document_xml(document_xml: bytes, block_specs: list[Bl
 
 
 def _apply_table_spec(table: ET.Element, spec: TableStyleSpec) -> bool:
+    # 先处理表格级属性，再把样式分发到每一行和每个单元格。
     changed = False
     table_pr = _ensure_child(table, "tblPr")
     changed |= _remove_child(table_pr, "tblStyle")
@@ -278,6 +290,7 @@ def _apply_cell_spec(cell: ET.Element, cell_spec: CellStyleSpec, table_spec: Tab
 
 
 def _apply_paragraph_spec(paragraph: ET.Element, spec: ParagraphStyleSpec) -> bool:
+    # 段落层主要处理对齐和行距，再把字体写进 run 级别。
     changed = False
     paragraph_pr = _ensure_child(paragraph, "pPr")
     if spec.text_align is not None:
@@ -292,6 +305,7 @@ def _apply_paragraph_spec(paragraph: ET.Element, spec: ParagraphStyleSpec) -> bo
 
 
 def _apply_run_style(run: ET.Element, spec: ParagraphStyleSpec) -> bool:
+    # Word 的字体、字号、加粗都落在 run 属性上。
     changed = False
     run_pr = _ensure_child(run, "rPr")
 
@@ -354,6 +368,7 @@ def _set_borders(
     *,
     include_inside: bool = True,
 ) -> bool:
+    # Word 边框节点不支持“局部更新”那么方便，这里直接重建边框容器最稳妥。
     container = _ensure_child(parent, container_tag)
     for child in list(container):
         container.remove(child)
@@ -411,6 +426,7 @@ def _remove_child(parent: ET.Element, tag: str) -> bool:
 
 
 def _parse_style_map(style: str) -> dict[str, str]:
+    # 把 `a: b; c: d` 形式的 style 文本转成小写键值表。
     mapping: dict[str, str] = {}
     for item in style.split(";"):
         if ":" not in item:
@@ -424,6 +440,7 @@ def _parse_style_map(style: str) -> dict[str, str]:
 
 
 def _parse_borders(style_map: dict[str, str], *, include_inside: bool = False) -> dict[str, BorderSpec]:
+    # 先取通用 border，再让边级属性覆盖通用值。
     borders: dict[str, BorderSpec] = {}
     common = _parse_border(style_map.get("border"))
     for side in ("top", "right", "bottom", "left"):
@@ -479,6 +496,7 @@ def _parse_padding(raw: str | None) -> PaddingSpec | None:
 
 
 def _line_height_to_spacing(line_height: str | None, font_size: str | None) -> dict[str, str] | None:
+    # Word 行距既支持固定值，也支持倍数行距，这里统一做换算。
     if line_height is None:
         return None
     value = line_height.strip().lower()
@@ -552,6 +570,7 @@ def _length_to_border_size(raw: str) -> int:
 
 
 def _map_border_style(style: str) -> str:
+    # CSS 边框样式与 Word 的枚举值并不完全一致，需要手工映射。
     return {
         "solid": "single",
         "dashed": "dashed",
@@ -608,6 +627,7 @@ def _is_bold_font_weight(value: str | None) -> bool:
 
 
 def _register_namespaces(xml_bytes: bytes) -> None:
+    # 保留原始命名空间前缀，避免回写 XML 后前缀风格被打乱。
     namespaces: list[tuple[str, str]] = []
     for _, namespace in ET.iterparse(BytesIO(xml_bytes), events=("start-ns",)):
         if namespace not in namespaces:

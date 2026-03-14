@@ -1,3 +1,8 @@
+"""业务测试用例模板示例。
+
+这份脚本演示如何把业务 Markdown 解析成结构化数据，再拼成稳定的 Word 表格。
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -28,6 +33,7 @@ BASE_DOCUMENT_CONFIG: dict[str, object] = {
     ],
 }
 
+# 样式预设直接写在脚本里，便于业务模板独立演进而不依赖外部 TOML。
 STYLE_PRESETS: dict[str, dict[str, object]] = {
     "business": {
         "font_family": "微软雅黑",
@@ -57,6 +63,7 @@ def render_document(
     config: dict[str, object],
     context: dict[str, object],
 ) -> dict[str, str]:
+    # render_document 是 companion 脚本的标准入口。
     template_style = str(metadata.get("template_style", "business"))
     # 业务样例约定样式直接写在 py 里，避免表格再受外部 toml 覆盖。
     html_parts = _render_business_section(
@@ -78,6 +85,7 @@ def _render_business_section(
     section_index: int,
     template_style: str,
 ) -> list[str]:
+    # 这一层负责把“结构化内容”组织成标题 + 表格的一整段 HTML。
     parsed = _parse_business_markdown(markdown)
     document_config = _resolve_document_config(template_style)
     fonts = _read_font_config(document_config)
@@ -128,6 +136,7 @@ def _render_business_section(
 
 
 def _parse_business_markdown(markdown: str) -> dict[str, Any]:
+    # 业务 markdown 采用约定式语法：# / ## / ### / #### 和 `- 标签：值`。
     lines = [line.rstrip() for line in markdown.splitlines()]
     title = ""
     module = ""
@@ -224,6 +233,7 @@ def _build_table_payload(
 
     meta_map = {label: value for label, value in parsed["meta_items"]}
     sections = parsed["sections"]
+    # “测试步骤”会被拆成逐行序号，其他大段文本则按业务区块直接平铺进表格。
     steps = _extract_steps(sections.get("测试步骤", []))
 
     rows: list[list[dict[str, object]]] = [
@@ -304,12 +314,14 @@ def _build_table_payload(
 
 
 def _resolve_document_config(template_style: str) -> dict[str, object]:
+    # 每个模板样式都基于基础配置再做覆盖。
     resolved = deepcopy(BASE_DOCUMENT_CONFIG)
     style_config = STYLE_PRESETS.get(template_style, STYLE_PRESETS["business"])
     return _deep_merge_dicts(resolved, style_config)
 
 
 def _extract_steps(lines: list[str]) -> list[str]:
+    # 允许“1. xxx”或纯文本两种写法，统一规整成步骤列表。
     steps: list[str] = []
     for line in lines:
         if ". " in line and line[0].isdigit():
@@ -321,6 +333,7 @@ def _extract_steps(lines: list[str]) -> list[str]:
 
 
 def _lookup_section_or_meta(label: str, sections: dict[str, list[str]], meta_map: dict[str, str]) -> str:
+    # 有些字段既可能来自元信息，也可能来自正文 section，这里统一兜底。
     if label in meta_map:
         return meta_map[label]
     if label in sections:
@@ -336,6 +349,7 @@ def _cell(
     bold: bool = False,
     font: dict[str, str | None] | None = None,
 ) -> dict[str, object]:
+    # 统一生成单元格 payload，减少表格构建时的重复样式字段。
     cell = {
         "text": text,
         "colspan": colspan,
@@ -363,6 +377,7 @@ def _string_list(value: object) -> list[str]:
 
 
 def _read_font_config(document_config: dict[str, object]) -> dict[str, dict[str, str | None]]:
+    # 各块字体配置最终会被收口成一套完整的字体规格字典。
     raw_fonts = document_config.get("fonts", {})
     if raw_fonts is not None and not isinstance(raw_fonts, dict):
         raise ValueError("document.fonts must be an object.")
@@ -396,6 +411,7 @@ def _font_spec(
     default_weight: str | None,
     default_align: str | None,
 ) -> dict[str, str | None]:
+    # 单个字体规格的兜底逻辑集中放在这里，避免每个块重复写默认值。
     value = fonts.get(key, {})
     if value is not None and not isinstance(value, dict):
         raise ValueError(f"document.fonts.{key} must be an object.")
@@ -409,6 +425,7 @@ def _font_spec(
 
 
 def _deep_merge_dicts(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
+    # 模板配置允许深层覆盖，例如只改 title 字体而保留其他配置。
     merged = deepcopy(base)
     for key, value in override.items():
         current = merged.get(key)

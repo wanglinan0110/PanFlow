@@ -1,10 +1,15 @@
+"""PanFlow 主流程编排。
+
+这里负责把 companion 渲染、JSON renderer 渲染、pandoc 调用和 docx 后处理串起来。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
 
-from panflow_service.config import ProjectConfig, render_config_toml
+from panflow_service.config import ProjectConfig
 from panflow_service.converter import render_markdown_document
 from panflow_service.document_processor import (
     discover_companion_document,
@@ -21,6 +26,7 @@ def render_markdown_file(
     output_path: Path,
     config: ProjectConfig,
 ) -> Path:
+    # render 子命令只输出中间结果，不生成 docx。
     companion = discover_companion_document(input_path)
     if has_companion_processor(companion, config.project_root):
         with TemporaryDirectory() as temp_dir:
@@ -52,6 +58,7 @@ def convert_markdown_file(
     intermediate_output: Path | None = None,
     reference_doc: Path | None = None,
 ) -> Path:
+    # convert 是完整链路入口：先判断是否走 companion，再决定是否进 JSON renderer。
     companion = discover_companion_document(input_path)
     if has_companion_processor(companion, config.project_root):
         return _convert_with_companion_processor(
@@ -99,24 +106,6 @@ def convert_markdown_file(
         return output_path
 
 
-def export_config_file(
-    output_path: Path,
-    config: ProjectConfig,
-    *,
-    reference_doc: Path | None = Path("templates/reference.docx"),
-) -> Path:
-    # export-config 的输出来自当前扫描结果，适合初始化或刷新 renderer 映射。
-    toml_text = render_config_toml(
-        config.renderers,
-        base_dir=output_path.parent.resolve(),
-        pandoc_binary=config.pandoc.binary,
-        reference_doc=reference_doc,
-    )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(toml_text, encoding="utf-8")
-    return output_path
-
-
 def _convert_with_companion_processor(
     companion,
     *,
@@ -125,6 +114,7 @@ def _convert_with_companion_processor(
     intermediate_output: Path | None,
     cli_reference_doc: Path | None,
 ) -> Path:
+    # companion 模式下，中间产物可能是 HTML，也可能是 gfm+raw_html。
     with TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         result = render_with_companion_processor(
@@ -168,6 +158,7 @@ def _prepare_reference_doc(
     output_path: Path,
     temp_root: Path,
 ) -> Path | None:
+    # reference.docx 会先复制到临时目录，再允许 renderer 钩子按块修改。
     working_reference_doc = None
     if base_reference_doc is not None:
         # 先复制一份模板副本，避免脚本处理时改写原始 reference.docx。

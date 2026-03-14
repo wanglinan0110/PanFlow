@@ -1,3 +1,5 @@
+"""Renderer 注册表与按需加载逻辑。"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -18,6 +20,7 @@ class RendererLoadError(RuntimeError):
 
 @dataclass(frozen=True)
 class LoadedRenderer:
+    # 把脚本路径、模块对象、render 函数和模板钩子收口到一个对象里。
     key: str
     path: Path
     module: ModuleType
@@ -32,6 +35,7 @@ class RendererRegistry:
         self._cache: dict[str, LoadedRenderer] = {}
 
     def render(self, key: str, payload: Any, context: dict[str, object]) -> str:
+        # 真正渲染前先确保脚本已经被加载并校验过接口。
         renderer = self._load_renderer(key)
         html = renderer.render(payload, context)
         if not isinstance(html, str):
@@ -47,6 +51,7 @@ class RendererRegistry:
         block_records: list[dict[str, object]],
         context: dict[str, object],
     ) -> Path | None:
+        # 模板钩子按 renderer 分组执行，避免同一个脚本对同一批块重复处理。
         reference_doc = current_reference_doc
         ordered_groups: list[tuple[LoadedRenderer, list[dict[str, object]]]] = []
         groups_by_path: dict[Path, list[dict[str, object]]] = {}
@@ -84,6 +89,7 @@ class RendererRegistry:
         return reference_doc
 
     def _load_renderer(self, key: str) -> LoadedRenderer:
+        # renderer 首次使用时动态导入，后续直接走缓存。
         cached = self._cache.get(key)
         if cached is not None:
             return cached
@@ -137,6 +143,7 @@ def _normalize_template_result(
     current_reference_doc: Path | None,
     renderer_path: Path,
 ) -> Path | None:
+    # 钩子允许返回 Path、字符串路径或 None，这里统一归一化。
     if result is None:
         return current_reference_doc
 

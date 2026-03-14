@@ -1,3 +1,5 @@
+"""Markdown 中 JSON renderer 代码块的替换逻辑。"""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +23,7 @@ class MarkdownRenderError(RuntimeError):
 
 @dataclass(frozen=True)
 class RenderResult:
+    # 除了渲染后的 markdown，也保留每个块的元信息，给模板钩子复用。
     markdown: str
     blocks: list[dict[str, object]]
 
@@ -31,6 +34,7 @@ def render_markdown_document(
     *,
     source_path: Path | None = None,
 ) -> RenderResult:
+    # 这个函数是“JSON 代码块 -> HTML”的主入口。
     blocks: list[dict[str, object]] = []
     block_index = 0
 
@@ -82,6 +86,7 @@ def render_markdown_text(
     *,
     source_path: Path | None = None,
 ) -> str:
+    # 纯字符串接口，适合测试或不关心 block 元数据的调用方。
     return render_markdown_document(
         markdown,
         registry,
@@ -90,6 +95,7 @@ def render_markdown_text(
 
 
 def parse_block_key(info: str) -> str | None:
+    # 兼容两种标记风格：```json key 与 ```json:key。
     if not info:
         return None
 
@@ -109,6 +115,7 @@ def _parse_json_payload(
     source_path: Path | None,
     block_index: int,
 ) -> Any:
+    # 解析失败时把来源文件和块序号一起带上，方便定位 markdown 里的坏数据。
     try:
         return json.loads(body)
     except json.JSONDecodeError as exc:

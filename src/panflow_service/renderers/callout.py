@@ -1,3 +1,5 @@
+"""简单提示块 renderer。"""
+
 RENDER_KEYS = ["callout"]
 
 
@@ -6,6 +8,7 @@ from typing import Any
 
 
 def render(payload: Any, context: dict[str, object]) -> str:
+    # callout 适合处理“标题 + 正文 + 语气”这类轻量信息块。
     if not isinstance(payload, dict):
         raise ValueError("callout renderer expects a JSON object.")
 

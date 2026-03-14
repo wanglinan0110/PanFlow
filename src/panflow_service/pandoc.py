@@ -1,3 +1,5 @@
+"""pandoc 命令拼装与执行。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,6 +42,7 @@ def run_pandoc(
     input_format: str = "gfm+raw_html",
     reference_doc: Path | None = None,
 ) -> None:
+    # 统一把所有 pandoc 调用收口到这里，便于错误处理和测试替身注入。
     command = build_pandoc_command(
         input_path,
         output_path,

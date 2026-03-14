@@ -41,12 +41,6 @@ python3 run_panflow.py examples/business.md -o build/business.docx
 python3 run_panflow.py render examples/business.md
 ```
 
-导出 renderer 映射配置：
-
-```bash
-python3 run_panflow.py export-config -o panflow.generated.toml
-```
-
 默认行为：
 
 - 省略子命令时会自动走 `convert`
@@ -190,7 +184,6 @@ testcase_table = "src/panflow_service/renderers/testcase_table.py"
 ```bash
 panflow convert input.md -o output.docx
 panflow render input.md -o output.rendered.html
-panflow export-config -o panflow.generated.toml
 ```
 
 常用参数：
