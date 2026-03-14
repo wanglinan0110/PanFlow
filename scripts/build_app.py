@@ -1,6 +1,6 @@
 """PyInstaller 打包脚本。
 
-负责把 CLI、模板资源、renderers 以及可选的 pandoc 一起封装成可分发应用。
+负责把 CLI、模板资源以及可选的 pandoc 一起封装成可分发应用。
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ def main(argv: list[str] | None = None) -> int:
     entry_script = project_root / "run_panflow.py"
     examples_dir = project_root / "examples"
     templates_dir = project_root / "templates"
-    renderers_dir = project_root / "src" / "panflow_service" / "renderers"
     pyinstaller = _resolve_pyinstaller()
 
     # 统一在这里拼装 PyInstaller 命令，确保源码资源和运行时资源一起打包。
@@ -58,8 +57,6 @@ def main(argv: list[str] | None = None) -> int:
         _add_data_arg(examples_dir, "examples"),
         "--add-data",
         _add_data_arg(templates_dir, "templates"),
-        "--add-data",
-        _add_data_arg(renderers_dir, "renderers"),
         str(entry_script),
     ]
 

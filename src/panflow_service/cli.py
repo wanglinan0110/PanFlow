@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     # CLI 只暴露两条主线命令：渲染中间产物、转换 Word。
     parser = argparse.ArgumentParser(
         prog="panflow",
-        description="Render JSON code blocks into HTML and convert Markdown to Word via pandoc.",
+        description="Render template-driven Markdown into HTML and convert Markdown to Word via pandoc.",
     )
     # 子命令拆分成 render / convert，便于单独调试各阶段。
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser = subparsers.add_parser(
         "convert",
         aliases=["c"],
-        help="Render JSON code blocks and then invoke pandoc to create a .docx file.",
+        help="Render the document and then invoke pandoc to create a .docx file.",
     )
     convert_parser.add_argument("input", type=Path, help="Source markdown file.")
     convert_parser.add_argument("-o", "--output", type=Path, help="Target .docx file path.")

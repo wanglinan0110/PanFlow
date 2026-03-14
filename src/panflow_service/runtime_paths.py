@@ -20,17 +20,6 @@ def resolve_examples_dir(project_root: Path) -> Path:
     )
 
 
-def resolve_renderers_dir(project_root: Path) -> Path:
-    # renderers 在源码模式和打包模式下目录位置不同，这里统一兜底。
-    return _first_existing_path(
-        [
-            project_root / "src" / "panflow_service" / "renderers",
-            _bundle_root() / "renderers" if _bundle_root() is not None else None,
-            _package_dir() / "renderers",
-        ],
-    )
-
-
 def resolve_reference_doc(project_root: Path) -> Path | None:
     # reference.docx 允许来自工程目录、打包资源或源码 checkout。
     candidates = [

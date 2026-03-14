@@ -15,12 +15,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from panflow_service.companion import build_document_result, render_heading
 from panflow_service import cli as cli_module
 from panflow_service.config import PandocConfig, ProjectConfig, discover_default_config
-from panflow_service.converter import MarkdownRenderError, render_markdown_text
 from panflow_service.document_processor import discover_companion_document, parse_markdown_document, render_with_companion_processor
 from panflow_service.docx_postprocess import apply_html_table_styles_to_docx
 from panflow_service.main import convert_markdown_file
 from panflow_service.pandoc import build_pandoc_command
-from panflow_service.registry import RendererRegistry
 
 
 class ConverterTestCase(unittest.TestCase):
@@ -28,64 +26,6 @@ class ConverterTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.project_root = Path(__file__).resolve().parents[1]
         self.config = discover_default_config(self.project_root)
-        # 测试统一复用默认配置扫描结果，避免每个用例自己拼 renderer 映射。
-        self.registry = RendererRegistry(self.config.renderers)
-
-    # 这一组测试关注“JSON 代码块 renderer”链路，验证 markdown 中的 fenced block
-    # 是否能被正确识别、解析并替换成 HTML。
-    def test_render_markdown_replaces_json_callout_block(self) -> None:
-        markdown = (
-            "# Demo\n\n"
-            "```json callout\n"
-            '{"title": "提示", "body": "已替换", "tone": "info"}\n'
-            "```\n"
-        )
-
-        rendered = render_markdown_text(markdown, self.registry)
-
-        self.assertIn('class="pf-callout pf-callout-info"', rendered)
-        self.assertIn("<strong>提示</strong>", rendered)
-        # 原始 fenced block 应该已经被完全替换掉，而不是残留在输出中。
-        self.assertNotIn("```json callout", rendered)
-
-    def test_numeric_renderer_key_works_for_business_table(self) -> None:
-        # 这里覆盖历史兼容语法：```json:1 应该命中数字 key 对应的 renderer。
-        markdown = (
-            "```json:1\n"
-            '{'
-            '"colgroup":["20%","80%"],'
-            '"table_style":{"width":"100%","border":"1px solid #000000","border_collapse":"collapse","line_height":"1.6"},'
-            '"rows":[['
-            '{"text":"字段","text_align":"center","vertical_align":"middle","line_height":"1.6","padding":"6pt 8pt","border":"1px solid #000000","bold":true},'
-            '{"text":"值","text_align":"center","vertical_align":"middle","line_height":"1.6","padding":"6pt 8pt","border":"1px solid #000000","bold":true}'
-            '],['
-            '{"text":"用例名称","text_align":"center","vertical_align":"middle","padding":"6pt 8pt","border":"1px solid #000000","bold":true},'
-            '{"text":"BCMI评估数据接口适配建模","vertical_align":"middle","line_height":"1.6","padding":"6pt 8pt","border":"1px solid #000000"}'
-            "]]}\n"
-            "```"
-        )
-
-        rendered = render_markdown_text(markdown, self.registry)
-
-        self.assertIn('class="pf-table pf-testcase-table"', rendered)
-        # 下面这些断言确保表格级和单元格级样式都已落到 HTML，后续 pandoc/docx
-        # 后处理才有足够信息写回 Word。
-        self.assertIn("border-collapse: collapse;", rendered)
-        self.assertIn("border: 1px solid #000000;", rendered)
-        self.assertIn("vertical-align: middle;", rendered)
-        self.assertIn("line-height: 1.6;", rendered)
-        self.assertIn("padding: 6pt 8pt;", rendered)
-        self.assertIn("<strong>字段</strong>", rendered)
-        self.assertIn("BCMI评估数据接口适配建模", rendered)
-
-    def test_invalid_json_raises_clear_error(self) -> None:
-        markdown = "```json callout\n{invalid json}\n```"
-
-        with self.assertRaises(MarkdownRenderError) as exc:
-            render_markdown_text(markdown, self.registry)
-
-        # 报错信息要尽量可定位，至少能一眼看出是 JSON 格式本身有问题。
-        self.assertIn("Invalid JSON", str(exc.exception))
 
     def test_build_pandoc_command_includes_reference_doc(self) -> None:
         command = build_pandoc_command(
@@ -110,7 +50,6 @@ class ConverterTestCase(unittest.TestCase):
             input_path.write_text("# demo\n", encoding="utf-8")
             config = ProjectConfig(
                 project_root=temp_path,
-                renderers={},
                 pandoc=PandocConfig(),
             )
 
@@ -134,7 +73,6 @@ class ConverterTestCase(unittest.TestCase):
             input_path.write_text("# demo\n", encoding="utf-8")
             config = ProjectConfig(
                 project_root=temp_path,
-                renderers={},
                 pandoc=PandocConfig(),
             )
 
@@ -155,18 +93,11 @@ class ConverterTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             bundle_root = Path(temp_dir)
             # 人工拼出一个最小 bundle 目录结构，模拟 PyInstaller 解包后的资源布局。
-            renderers_dir = bundle_root / "renderers"
-            renderers_dir.mkdir()
-            (renderers_dir / "demo.py").write_text(
-                "\n".join(
-                    [
-                        'RENDER_KEYS = ["demo"]',
-                        "",
-                        "def render(payload, context):",
-                        '    return "<p>demo</p>"',
-                    ],
-                )
-                + "\n",
+            examples_dir = bundle_root / "examples"
+            examples_dir.mkdir()
+            (examples_dir / "business.py").write_text(
+                "def render_document(markdown, metadata, config, context):\n"
+                '    return {"content": "<p>demo</p>", "input_format": "html", "template_style": "business"}\n',
                 encoding="utf-8",
             )
             templates_dir = bundle_root / "templates"
@@ -183,59 +114,9 @@ class ConverterTestCase(unittest.TestCase):
             with patch.object(sys, "_MEIPASS", str(bundle_root), create=True):
                 config = discover_default_config(bundle_root / "workspace")
 
-            self.assertIn("demo", config.renderers)
-            self.assertEqual(config.renderers["demo"].name, "demo.py")
-            # 这里同时验证 bundled 的模板和 bundled 的 pandoc 都能被发现。
+            # 这里重点验证 bundled 的模板和 bundled 的 pandoc 都能被发现。
             self.assertEqual(config.pandoc.reference_doc, (templates_dir / "reference.docx").resolve())
             self.assertEqual(config.pandoc.binary, str((bin_dir / ("pandoc.exe" if sys.platform.startswith("win") else "pandoc")).resolve()))
-
-    # 这一组测试关注 renderer 对 reference.docx 的覆盖能力。
-    def test_renderer_can_override_reference_doc(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            # 动态写一个最小 renderer，专门测试 prepare_reference_doc 钩子是否生效。
-            renderer_path = temp_path / "hooked.py"
-            renderer_path.write_text(
-                "\n".join(
-                    [
-                        'RENDER_KEYS = ["hooked"]',
-                        "from pathlib import Path",
-                        "",
-                        "def render(payload, context):",
-                        '    return "<p>ok</p>"',
-                        "",
-                        "def prepare_reference_doc(reference_doc, blocks, context):",
-                        '    target = Path(context["temp_dir"]) / "hooked-reference.docx"',
-                        '    target.write_bytes(b"hooked")',
-                        "    return target",
-                    ],
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            input_path = temp_path / "input.md"
-            # markdown 中只保留一个 hooked block，让测试聚焦在 reference_doc 覆盖逻辑。
-            input_path.write_text('```json hooked\n{}\n```\n', encoding="utf-8")
-            base_reference_doc = temp_path / "reference.docx"
-            base_reference_doc.write_bytes(b"base")
-            output_path = temp_path / "output.docx"
-
-            config = ProjectConfig(
-                project_root=temp_path,
-                renderers={"hooked": renderer_path},
-                pandoc=PandocConfig(
-                    binary="pandoc",
-                    reference_doc=base_reference_doc,
-                ),
-            )
-
-            with patch("panflow_service.main.run_pandoc") as mocked_run_pandoc:
-                convert_markdown_file(input_path, output_path, config)
-
-            self.assertTrue(mocked_run_pandoc.called)
-            called_reference_doc = mocked_run_pandoc.call_args.kwargs["reference_doc"]
-            # 断言目标是：最终送进 pandoc 的模板已经变成 renderer 钩子返回的新文件。
-            self.assertEqual(called_reference_doc.name, "hooked-reference.docx")
 
     # 这一组测试专门验证 Markdown front matter 切段逻辑。
     def test_parse_markdown_document_supports_toml_front_matter(self) -> None:
@@ -428,7 +309,6 @@ class ConverterTestCase(unittest.TestCase):
             )
             config = ProjectConfig(
                 project_root=temp_path,
-                renderers={},
                 pandoc=PandocConfig(binary="pandoc"),
             )
 

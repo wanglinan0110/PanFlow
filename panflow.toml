@@ -1,12 +1,14 @@
+# PanFlow 运行时主配置。
+# 当前配置主要控制 pandoc 的可执行文件与默认 Word 模板。
+# 目前主输入协议是：
+# 1. markdown 使用 TOML front matter 按 section 划分
+# 2. 每个 section 通过 template_style 选择对应的 examples/*.py 脚本
+
 [pandoc]
+# pandoc 可执行文件名或绝对路径。
+# 如果系统 PATH 中已有 pandoc，通常直接写 "pandoc" 即可。
 binary = "pandoc"
+
+# 默认 reference.docx 路径。
+# 相对路径会按当前配置文件所在目录解析。
 reference_doc = "templates/reference.docx"
-
-[renderers]
-1 = "src/panflow_service/renderers/testcase_table.py"
-callout = "src/panflow_service/renderers/callout.py"
-json_table = "src/panflow_service/renderers/testcase_table.py"
-metrics = "src/panflow_service/renderers/metrics.py"
-table = "src/panflow_service/renderers/testcase_table.py"
-testcase_table = "src/panflow_service/renderers/testcase_table.py"
-
