@@ -1,23 +1,35 @@
+# PEP 517/518 构建配置：声明项目用什么后端来构建 wheel / sdist。
 [build-system]
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# 项目基础元数据：这里的信息会被安装器、包索引和构建工具读取。
 [project]
+# 发布到包管理工具时使用的包名。
 name = "panflow-service"
+# 当前项目版本号。
 version = "0.1.0"
+# 简短描述，主要给安装工具和包页面展示。
 description = "PanFlow markdown-to-Word conversion tool"
+# 长说明文档来源。
 readme = "README.md"
+# 当前仓库统一要求 Python 3.12 及以上版本。
 requires-python = ">=3.12"
+# 运行时依赖；当前主流程只依赖标准库，因此保持为空。
 dependencies = []
 
+# 可选依赖分组：只有在打包 exe 等构建场景下才需要安装。
 [project.optional-dependencies]
 build = ["pyinstaller>=6.0"]
 
+# 安装后暴露的命令行入口。
 [project.scripts]
 panflow = "panflow_service.cli:main"
 
+# setuptools 的源码布局配置：项目源码统一放在 src/ 目录下。
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+# 自动发现 src/ 下的 Python 包。
 [tool.setuptools.packages.find]
 where = ["src"]

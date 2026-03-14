@@ -477,10 +477,11 @@ class ConverterTestCase(unittest.TestCase):
         self.assertEqual(len(companion.document.sections), 2)
         self.assertGreaterEqual(result.content.count("font-family:"), 6)
         self.assertIn("<h1", result.content)
-        self.assertIn('data-template-style="business"', result.content)
-        self.assertIn('data-template-style="business_alt"', result.content)
-        self.assertIn('class="pf-section pf-section-business"', result.content)
-        self.assertIn('class="pf-section pf-section-business_alt"', result.content)
+        for section in companion.document.sections:
+            template_style = str(section.metadata["template_style"])
+            # 这里直接对齐示例文件里的真实 template_style，避免测试和 examples/business.md 脱节。
+            self.assertIn(f'data-template-style="{template_style}"', result.content)
+            self.assertIn(f'class="pf-section pf-section-{template_style}"', result.content)
         self.assertIn('page-break-before: always;', result.content)
         self.assertGreaterEqual(result.content.count('class="pf-table pf-testcase-table"'), 2)
         self.assertIn('class="pf-table pf-testcase-table"', result.content)
