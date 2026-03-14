@@ -7,7 +7,7 @@ name = "panflow-service"
 version = "0.1.0"
 description = "PanFlow markdown-to-Word conversion tool"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]

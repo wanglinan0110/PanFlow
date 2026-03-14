@@ -2,110 +2,85 @@
 
 一个离线优先的 Markdown 转 Word 工具。
 
-当前工程的主链路是：
+PanFlow 的核心思路不是“把 Markdown 直接丢给 pandoc”，而是先用 Python 脚本把业务内容渲染成更可控的 HTML，再交给 `pandoc` 生成 `.docx`，最后对复杂表格做一次 Word 样式回填。这样更适合需要精细控制字体、边框、行高、对齐和分页的文档场景。
 
-- `md` 用 TOML front matter 声明每个 section 的 `template_style`
-- PanFlow 固定去 `examples/` 下查找对应的 `*.py` 处理脚本
-- `*.py` 直接生成用于 Word 的 HTML，字体、边框、行高、对齐都在脚本里定义
-- `pandoc` 只负责 `HTML -> docx`
-- 对复杂表格，再补一层 docx 后处理，把边框、行高、对齐和字体写成真实 Word 样式
+## 特性
+
+- 支持 TOML front matter 按 section 分发不同模板脚本
+- 支持 `examples/*.py` 直接输出用于 Word 的 HTML
+- 支持 JSON 代码块 renderer
+- 支持 `reference.docx` 作为默认 Word 模板
+- 支持对复杂表格做 `.docx` 后处理，补齐真实 Word 边框和单元格样式
+- 支持 PyInstaller 打包
+- 支持推送 `v*` tag 后由 GitHub Actions 自动产出 Windows `exe`
+
+## 环境要求
+
+- Python 3.12+
+- 本机安装 `pandoc`
+
+如果你使用仓库发布页下载的 Windows `exe`，则不需要单独准备 Python 环境；发布产物会把 `pandoc` 一起打进去。
 
 ## 快速开始
 
-环境要求：
-
-- Python 3.11+
-- 本机已安装 `pandoc`
-
-最常用命令：
+直接从源码运行：
 
 ```bash
-# 直接生成同名 Word
 python3 run_panflow.py examples/business.md
+```
 
-# 指定输出路径
+指定输出路径：
+
+```bash
 python3 run_panflow.py examples/business.md -o build/business.docx
+```
 
-# 只看 py 生成的中间 HTML
+只生成中间 HTML：
+
+```bash
 python3 run_panflow.py render examples/business.md
+```
 
-# 导出全局 JSON renderer 配置
+导出 renderer 映射配置：
+
+```bash
 python3 run_panflow.py export-config -o panflow.generated.toml
 ```
 
-默认情况下：
+默认行为：
 
 - 省略子命令时会自动走 `convert`
 - `render` 默认输出 `同名.rendered.html`
 - `convert` 默认输出 `同名.docx`
 
-## 打包应用
+## 安装方式
 
-仓库里已经补了一个 PyInstaller 打包脚本：[build_app.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/scripts/build_app.py#L1)。
+开发时可以直接用 `run_panflow.py`，也可以安装成命令行工具：
 
-先安装打包依赖：
+```bash
+python3 -m pip install -e .
+panflow examples/business.md
+```
+
+如果只是打包：
 
 ```bash
 python3 -m pip install ".[build]"
 ```
 
-打包成目录版应用：
+## 工作流
 
-```bash
-python3 scripts/build_app.py --mode onedir
-```
+当前主链路如下：
 
-输出目录默认在：
+1. Markdown 按 TOML front matter 切分 section
+2. 每个 section 根据 `template_style` 选择对应的 `examples/*.py`
+3. Python 模板脚本输出 HTML
+4. `pandoc` 负责 `html -> docx`
+5. 对复杂表格执行 `.docx` 后处理
 
-```text
-dist/PanFlow/
-```
+### Section 分发规则
 
-如果你想把本机 `pandoc` 也一起打进应用里，让目标机器不再单独安装 `pandoc`，可以这样打包：
-
-```bash
-python3 scripts/build_app.py --mode onedir --pandoc-binary "$(which pandoc)"
-```
-
-说明：
-
-- 打包脚本会把 `examples/`、`templates/`、内置 `renderers/` 一起带进应用
-- 应用启动后会优先查找内置资源，所以打包后依然能命中 `examples/business.py`
-- 如果同时打包了 `pandoc`，应用会优先使用内置 `bin/pandoc`
-
-### GitHub tag 自动产出 exe
-
-仓库里现在带有 Windows 发布工作流：[release-windows.yml](/Users/wanglinan/Documents/huaru/AI/PanFlow/.github/workflows/release-windows.yml#L1)。
-
-当你推送形如 `v*` 的 tag 时，GitHub Actions 会自动：
-
-- 在 `windows-latest` 上安装 Python 3.11
-- 安装 `pandoc`
-- 执行测试
-- 用 `PyInstaller` 构建单文件版 `PanFlow.exe`
-- 把产物上传到对应的 GitHub Release
-
-常用发布命令：
-
-```bash
-git add .
-git commit -m "Add Windows release workflow"
-git tag v0.1.0
-git push origin main
-git push origin v0.1.0
-```
-
-发布完成后，你可以在 GitHub 的 Release 页面下载：
-
-```text
-PanFlow-v0.1.0-windows-x64.exe
-```
-
-## 当前工作方式
-
-### 1. Section 分发
-
-`md` 文件通过 TOML front matter 分段：
+Markdown 示例：
 
 ```markdown
 +++
@@ -119,17 +94,21 @@ template_style = "business_alt"
 # 第二段
 ```
 
-PanFlow 会按 section 逐段处理：
+PanFlow 会按下面的顺序查找 companion 脚本：
 
-1. 优先查找 `examples/<template_style>.py`
-2. 如果没找到，再回退到 `examples/<md同名>.py`
-3. 如果仍然没找到，这一段会在控制台打印警告，但不会影响其他 section 继续生成
+1. `examples/<template_style>.py`
+2. `examples/<markdown同名>.py`
+3. 如果都不存在，打印警告并跳过该 section
 
-这套逻辑在 [document_processor.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/document_processor.py#L120)。
+当前仓库里的示例文件：
 
-### 2. Python 脚本产出 HTML
+- `examples/business.md`
+- `examples/business.py`
+- `examples/business_alt.py`
 
-每个样式脚本都需要暴露：
+## 模板脚本
+
+模板脚本需要暴露：
 
 ```python
 def render_document(markdown, metadata, config, context):
@@ -146,100 +125,42 @@ def render_document(markdown, metadata, config, context):
 }
 ```
 
-辅助函数在 [companion.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/companion.py#L1)：
+辅助函数在 `src/panflow_service/companion.py` 中，常用的有：
 
 - `build_document_result(...)`
 - `render_heading(...)`
 - `build_inline_style(...)`
 
-### 3. pandoc 只做转换
+### 样式控制
 
-当前 companion 链路里，`py` 产出的 HTML 会直接交给 `pandoc`：
+PanFlow 的样式控制主要分成三层：
 
-- 输入格式：`html`
-- 输出格式：`docx`
-- 可选模板：`--reference-doc`
+- Python 模板脚本决定标题、字体、字号、表格 HTML 和分页
+- `reference.docx` 提供页面设置和基础 Word 样式
+- `.docx` 后处理修正 pandoc 对复杂表格支持不足的部分
 
-对应实现见 [main.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/main.py#L120) 和 [pandoc.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/pandoc.py#L1)。
+复杂表格通常直接在 HTML 中写这些属性：
 
-### 4. docx 后处理
+- `border`
+- `border_collapse`
+- `table_layout`
+- `line_height`
+- `padding`
+- `text_align`
+- `vertical_align`
+- `font_family`
+- `font_size`
+- `font_weight`
 
-`pandoc` 对复杂 HTML 表格的 CSS 支持不完整，所以生成完 `.docx` 后，PanFlow 会再写回真实 Word 样式：
+内置 renderer 位于：
 
-- 表格边框
-- 单元格边框
-- 垂直居中
-- 行高
-- 字体
-- 字号
-- 加粗
-- 单元格内边距
+- `src/panflow_service/renderers/testcase_table.py`
+- `src/panflow_service/renderers/callout.py`
+- `src/panflow_service/renderers/metrics.py`
 
-对应实现见 [docx_postprocess.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/docx_postprocess.py#L1)。
+## 配置文件
 
-## 示例文件
-
-当前仓库里真实存在并可直接运行的示例是：
-
-- Markdown 示例：[business.md](/Users/wanglinan/Documents/huaru/AI/PanFlow/examples/business.md)
-- 第一套样式脚本：[business.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/examples/business.py#L1)
-- 第二套样式脚本：[business_alt.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/examples/business_alt.py#L1)
-
-`business.md` 里有两个 section：
-
-- `template_style = "business"` 会命中 `examples/business.py`
-- `template_style = "business_alt"` 会命中 `examples/business_alt.py`
-
-## 表格样式怎么定义
-
-复杂表格的样式不再依赖外部样式表，也不依赖 companion TOML。
-
-表格相关样式直接在 `py` 里写进 HTML payload，例如：
-
-- 表格级：
-  - `width`
-  - `border`
-  - `border_collapse`
-  - `table_layout`
-  - `line_height`
-  - `font_family`
-  - `font_size`
-- 单元格级：
-  - `text_align`
-  - `vertical_align`
-  - `line_height`
-  - `padding`
-  - `border`
-  - `font_family`
-  - `font_size`
-  - `font_weight`
-
-参考实现见 [testcase_table.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/renderers/testcase_table.py#L1)。
-
-## 标题和字体怎么定义
-
-`# / ## / ###` 对应的标题样式由样式脚本自己决定，不由 Markdown 本身决定。
-
-当前业务样例里是这样做的：
-
-- [business.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/examples/business.py#L27) 里定义 `STYLE_PRESETS`
-- [business_alt.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/examples/business_alt.py#L27) 里定义另一套 `STYLE_PRESETS`
-- 再通过 `render_heading(...)` 把字体、字号、粗细、对齐写进 HTML
-
-如果你要改带 `#` 的标题样式，改对应脚本里的：
-
-- `title`
-- `module`
-- `case_title`
-
-## 全局配置
-
-工程里还保留一份全局配置 [panflow.toml](/Users/wanglinan/Documents/huaru/AI/PanFlow/panflow.toml#L1)，它只负责两类事情：
-
-1. 配置 `pandoc`
-2. 配置“全局 JSON 代码块 renderer”模式
-
-当前内容大致是：
+默认配置文件是仓库根目录的 `panflow.toml`：
 
 ```toml
 [pandoc]
@@ -255,114 +176,142 @@ table = "src/panflow_service/renderers/testcase_table.py"
 testcase_table = "src/panflow_service/renderers/testcase_table.py"
 ```
 
-说明：
+它主要负责两类事情：
 
-- `panflow.toml` 仍然有用
-- 它不再参与 `examples/*.py` 的 section 分发
-- 但它仍然影响默认 `pandoc` 路径、默认 `reference.docx`，以及 JSON 代码块渲染模式
+- 指定 `pandoc` 可执行文件和默认 `reference.docx`
+- 指定 JSON 代码块 renderer 映射
 
-配置读取逻辑在 [config.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/config.py#L1)。
+如果你通过 `--config` 显式传入配置文件，运行时会使用你指定的那一份。
 
-## reference.docx 的作用
+## CLI
 
-[reference.docx](/Users/wanglinan/Documents/huaru/AI/PanFlow/templates/reference.docx) 现在仍然是默认 Word 模板。
+安装后可使用命令：
 
-它主要负责兜底这些内容：
+```bash
+panflow convert input.md -o output.docx
+panflow render input.md -o output.rendered.html
+panflow export-config -o panflow.generated.toml
+```
 
-- 页面大小
-- 页边距
-- 默认段落样式
-- Word 原生标题样式
-- 没有被 `py + docx 后处理` 显式覆盖的部分
+常用参数：
 
-如果 `py` 返回了自己的 `reference_doc`，或者命令行显式传了 `--reference-doc`，就会覆盖默认模板。
+- `--config`：指定配置文件
+- `--intermediate-output`：保留中间渲染产物
+- `--reference-doc`：覆盖默认 Word 模板
 
-## 目录结构
+开发时同样可以继续使用：
+
+```bash
+python3 run_panflow.py ...
+```
+
+## 打包
+
+仓库内置了 PyInstaller 打包脚本：
+
+```bash
+python3 scripts/build_app.py --mode onedir
+```
+
+输出目录默认在：
 
 ```text
-PanFlow/
-├── examples/
-│   ├── business.md
-│   ├── business.py
-│   └── business_alt.py
-├── panflow.toml
-├── pyproject.toml
-├── README.md
-├── run_panflow.py
-├── src/
-│   └── panflow_service/
-│       ├── cli.py
-│       ├── companion.py
-│       ├── config.py
-│       ├── converter.py
-│       ├── document_processor.py
-│       ├── docx_postprocess.py
-│       ├── main.py
-│       ├── pandoc.py
-│       ├── registry.py
-│       └── renderers/
-│           ├── callout.py
-│           ├── metrics.py
-│           └── testcase_table.py
-├── templates/
-│   └── reference.docx
-└── tests/
-    └── test_converter.py
+dist/PanFlow/
+```
+
+如果要打单文件：
+
+```bash
+python3 scripts/build_app.py --mode onefile
+```
+
+如果你希望把本机 `pandoc` 一起打包进去：
+
+```bash
+python3 scripts/build_app.py --mode onefile --pandoc-binary "$(which pandoc)"
+```
+
+打包脚本会自动带上：
+
+- `examples/`
+- `templates/`
+- `src/panflow_service/renderers/`
+
+## GitHub 发布
+
+仓库包含 Windows 发布工作流：
+
+- `.github/workflows/release-windows.yml`
+
+当你推送形如 `v*` 的 tag 时，GitHub Actions 会自动：
+
+1. 在 `windows-latest` 上安装 Python 3.12
+2. 安装 `pandoc`
+3. 执行测试
+4. 构建单文件 `PanFlow.exe`
+5. 上传 artifact
+6. 发布到对应 GitHub Release
+
+发布命令示例：
+
+```bash
+git add .
+git commit -m "Prepare release"
+git push origin main
+git tag v0.1.3
+git push origin v0.1.3
+```
+
+发布成功后，Release 页面会出现类似这样的附件：
+
+```text
+PanFlow-v0.1.3-windows-x64.exe
 ```
 
 ## 测试
 
-运行测试：
+本地运行测试：
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 当前测试覆盖了这些关键链路：
 
-- CLI 默认 `convert`
-- `template_style -> examples/*.py` 分发
-- 同名脚本回退
-- 未知 `template_style` 只告警不中断
-- HTML 表格样式回填 docx
+- CLI 默认行为
+- renderer 映射
+- companion section 分发
+- `pandoc` 命令组装
+- bundled 资源发现
+- `.docx` 表格后处理
 
-## 常见排查
+## 项目结构
 
-### 1. 生成的 Word 没样式
+```text
+PanFlow/
+├── examples/
+├── scripts/
+│   └── build_app.py
+├── src/panflow_service/
+│   ├── cli.py
+│   ├── main.py
+│   ├── config.py
+│   ├── pandoc.py
+│   ├── document_processor.py
+│   ├── docx_postprocess.py
+│   └── renderers/
+├── templates/
+│   └── reference.docx
+├── tests/
+├── panflow.toml
+└── run_panflow.py
+```
 
-优先检查：
+## 适用场景
 
-1. `md` 里的 `template_style` 是否和 `examples/*.py` 对得上
-2. 实际执行的是否是 `python3 run_panflow.py your.md`
-3. `render your.md` 生成的 HTML 里是否已经有字体、边框、行高、对齐
+PanFlow 更适合下面这类文档：
 
-### 2. 表格边框变成虚线
-
-如果 HTML 里已经是实线，但 Word 里看起来还是虚线，通常是因为没经过 docx 后处理，或者查看器显示的是网格线。当前工程已经在 [main.py](/Users/wanglinan/Documents/huaru/AI/PanFlow/src/panflow_service/main.py#L155) 自动补这一步。
-
-### 3. 字体没有按 py 生效
-
-先看 `py` 输出的 HTML 是否真的带了 `font-family / font-size / font-weight`。如果 HTML 正确但 Word 里不对，再检查：
-
-- 对应段落是否已经进入 docx 后处理
-- 机器上是否安装了该字体
-- `reference.docx` 是否有冲突样式
-
-### 4. 某个 section 没生成
-
-通常是：
-
-- `template_style` 对应的 `examples/<template_style>.py` 不存在
-- 同名回退脚本 `examples/<md同名>.py` 也不存在
-
-这时控制台会打印 warning，但其他 section 仍会继续生成。
-
-## 开发建议
-
-如果你要新增一套业务样式，最简单的做法是：
-
-1. 在 `md` 中新增一个 `template_style`
-2. 在 `examples/` 新建同名 `*.py`
-3. 在脚本里直接定义标题字体、表格样式、单元格边框和行高
-4. 先跑 `render` 看 HTML
-5. 再跑 `convert` 看最终 Word
+- 有明确业务模板的 Markdown 转 Word
+- 需要固定字体、字号、边框和分页规则的交付文档
+- 需要 Python 参与渲染逻辑的文档生成流程
+- 需要把复杂表格稳定落到 Word 的场景
