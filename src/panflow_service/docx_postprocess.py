@@ -72,6 +72,7 @@ class ParagraphStyleSpec:
     font_family: str | None = None
     font_size: str | None = None
     font_weight: str | None = None
+    style_candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,11 @@ def apply_html_table_styles_to_docx(html: str, docx_path: Path) -> bool:
 
     with ZipFile(docx_path, "r") as docx_file:
         document_xml = docx_file.read("word/document.xml")
-        updated_xml = _apply_block_specs_to_document_xml(document_xml, block_specs)
+        try:
+            paragraph_styles = _extract_paragraph_style_ids(docx_file.read("word/styles.xml"))
+        except KeyError:
+            paragraph_styles = {}
+        updated_xml = _apply_block_specs_to_document_xml(document_xml, block_specs, paragraph_styles)
         if updated_xml == document_xml:
             return False
 
@@ -117,7 +122,17 @@ def _collect_block_specs(node: ET.Element, blocks: list[BlockSpec]) -> None:
         if child.tag == "table":
             blocks.append(BlockSpec(kind="table", table=_extract_table_spec(child)))
             continue
-        if child.tag in {"h1", "h2", "h3", "h4", "h5", "h6", "p"}:
+        if child.tag in {"h1", "h2", "h3", "h4", "h5", "h6", "p"} or _is_paragraph_like_div(child):
+            style_candidates = {
+                "h1": ("heading 1",),
+                "h2": ("heading 2",),
+                "h3": ("heading 3",),
+                "h4": ("heading 4",),
+                "h5": ("heading 5",),
+                "h6": ("heading 6",),
+                "p": ("正文标准", "Normal"),
+                "div": ("正文标准", "Normal"),
+            }.get(child.tag, ())
             style_map = _parse_style_map(child.get("style", ""))
             blocks.append(
                 BlockSpec(
@@ -128,11 +143,26 @@ def _collect_block_specs(node: ET.Element, blocks: list[BlockSpec]) -> None:
                         font_family=style_map.get("font-family"),
                         font_size=style_map.get("font-size"),
                         font_weight=style_map.get("font-weight"),
+                        style_candidates=style_candidates,
                     ),
                 ),
             )
             continue
         _collect_block_specs(child, blocks)
+
+
+def _is_paragraph_like_div(node: ET.Element) -> bool:
+    # design_doc 这类脚本会把正文行渲染成 div；只有“没有 block 子节点的叶子 div”才当作段落处理，
+    # 避免把外层布局容器误算成一个 Word 段落。
+    if node.tag != "div":
+        return False
+    child_tags = {child.tag for child in list(node)}
+    block_tags = {"div", "p", "table", "h1", "h2", "h3", "h4", "h5", "h6"}
+    if child_tags & block_tags:
+        return False
+    has_text = bool((node.text or "").strip())
+    has_style = bool(node.get("style"))
+    return has_text or has_style
 
 
 def _extract_table_spec(table: ET.Element) -> TableStyleSpec:
@@ -190,7 +220,11 @@ def _iter_rows(table: ET.Element) -> list[ET.Element]:
     return rows
 
 
-def _apply_block_specs_to_document_xml(document_xml: bytes, block_specs: list[BlockSpec]) -> bytes:
+def _apply_block_specs_to_document_xml(
+    document_xml: bytes,
+    block_specs: list[BlockSpec],
+    paragraph_styles: dict[str, str],
+) -> bytes:
     # HTML 块和 Word XML 块按顺序对齐，只在类型匹配时写入样式。
     _register_namespaces(document_xml)
     root = ET.fromstring(document_xml)
@@ -209,10 +243,10 @@ def _apply_block_specs_to_document_xml(document_xml: bytes, block_specs: list[Bl
             xml_index += 1
             continue
         if block_spec.kind == "table" and block_spec.table is not None:
-            if _apply_table_spec(xml_block, block_spec.table):
+            if _apply_table_spec(xml_block, block_spec.table, paragraph_styles):
                 changed = True
         if block_spec.kind == "paragraph" and block_spec.paragraph is not None:
-            if _apply_paragraph_spec(xml_block, block_spec.paragraph):
+            if _apply_paragraph_spec(xml_block, block_spec.paragraph, paragraph_styles):
                 changed = True
         block_index += 1
         xml_index += 1
@@ -221,7 +255,7 @@ def _apply_block_specs_to_document_xml(document_xml: bytes, block_specs: list[Bl
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-def _apply_table_spec(table: ET.Element, spec: TableStyleSpec) -> bool:
+def _apply_table_spec(table: ET.Element, spec: TableStyleSpec, paragraph_styles: dict[str, str]) -> bool:
     # 先处理表格级属性，再把样式分发到每一行和每个单元格。
     changed = False
     table_pr = _ensure_child(table, "tblPr")
@@ -236,12 +270,17 @@ def _apply_table_spec(table: ET.Element, spec: TableStyleSpec) -> bool:
 
     rows = table.findall(f"{W}tr")
     for row_element, row_spec in zip(rows, spec.rows):
-        if _apply_row_spec(row_element, row_spec, spec):
+        if _apply_row_spec(row_element, row_spec, spec, paragraph_styles):
             changed = True
     return changed
 
 
-def _apply_row_spec(row: ET.Element, row_spec: RowStyleSpec, table_spec: TableStyleSpec) -> bool:
+def _apply_row_spec(
+    row: ET.Element,
+    row_spec: RowStyleSpec,
+    table_spec: TableStyleSpec,
+    paragraph_styles: dict[str, str],
+) -> bool:
     changed = False
     line_height = row_spec.line_height or table_spec.line_height
     font_size = row_spec.font_size or table_spec.font_size
@@ -252,12 +291,17 @@ def _apply_row_spec(row: ET.Element, row_spec: RowStyleSpec, table_spec: TableSt
 
     cells = row.findall(f"{W}tc")
     for cell_element, cell_spec in zip(cells, row_spec.cells):
-        if _apply_cell_spec(cell_element, cell_spec, table_spec):
+        if _apply_cell_spec(cell_element, cell_spec, table_spec, paragraph_styles):
             changed = True
     return changed
 
 
-def _apply_cell_spec(cell: ET.Element, cell_spec: CellStyleSpec, table_spec: TableStyleSpec) -> bool:
+def _apply_cell_spec(
+    cell: ET.Element,
+    cell_spec: CellStyleSpec,
+    table_spec: TableStyleSpec,
+    paragraph_styles: dict[str, str],
+) -> bool:
     changed = False
     cell_pr = _ensure_child(cell, "tcPr")
     borders = cell_spec.borders or table_spec.borders
@@ -284,52 +328,29 @@ def _apply_cell_spec(cell: ET.Element, cell_spec: CellStyleSpec, table_spec: Tab
                 font_family=font_family,
                 font_size=font_size,
                 font_weight=font_weight,
+                style_candidates=("表格文字", "表正文格式", "Normal"),
             ),
+            paragraph_styles,
         )
     return changed
 
 
-def _apply_paragraph_spec(paragraph: ET.Element, spec: ParagraphStyleSpec) -> bool:
-    # 段落层主要处理对齐和行距，再把字体写进 run 级别。
+def _apply_paragraph_spec(
+    paragraph: ET.Element,
+    spec: ParagraphStyleSpec,
+    paragraph_styles: dict[str, str],
+) -> bool:
+    # 段落层只处理对齐和行距，避免把字体/字号固化成 run 级直接格式，影响 WPS 样式编辑。
     changed = False
     paragraph_pr = _ensure_child(paragraph, "pPr")
+    style_id = _resolve_paragraph_style_id(spec.style_candidates, paragraph_styles)
+    if style_id is not None:
+        changed |= _set_attr_child(paragraph_pr, "pStyle", {"val": style_id})
     if spec.text_align is not None:
         changed |= _set_attr_child(paragraph_pr, "jc", {"val": _map_text_align(spec.text_align)})
     spacing = _line_height_to_spacing(spec.line_height, spec.font_size)
     if spacing is not None:
         changed |= _set_attr_child(paragraph_pr, "spacing", spacing)
-
-    for run in paragraph.findall(f"{W}r"):
-        changed |= _apply_run_style(run, spec)
-    return changed
-
-
-def _apply_run_style(run: ET.Element, spec: ParagraphStyleSpec) -> bool:
-    # Word 的字体、字号、加粗都落在 run 属性上。
-    changed = False
-    run_pr = _ensure_child(run, "rPr")
-
-    font_family = _normalize_font_family(spec.font_family)
-    if font_family is not None:
-        changed |= _set_attr_child(
-            run_pr,
-            "rFonts",
-            {
-                "ascii": font_family,
-                "hAnsi": font_family,
-                "eastAsia": font_family,
-                "cs": font_family,
-            },
-        )
-
-    font_size = _font_size_to_half_points(spec.font_size)
-    if font_size is not None:
-        changed |= _set_attr_child(run_pr, "sz", {"val": str(font_size)})
-        changed |= _set_attr_child(run_pr, "szCs", {"val": str(font_size)})
-
-    if _is_bold_font_weight(spec.font_weight):
-        changed |= _set_empty_child(run_pr, "b")
-        changed |= _set_empty_child(run_pr, "bCs")
     return changed
 
 
@@ -398,6 +419,38 @@ def _set_attr_child(parent: ET.Element, tag: str, attrs: dict[str, str]) -> bool
             child.set(attr_key, value)
             changed = True
     return changed
+
+
+def _extract_paragraph_style_ids(styles_xml: bytes) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    root = ET.fromstring(styles_xml)
+    for style in root.findall(f"{W}style"):
+        if style.get(f"{W}type") != "paragraph":
+            continue
+        style_id = style.get(f"{W}styleId")
+        if not style_id:
+            continue
+        name_element = style.find(f"{W}name")
+        if name_element is not None:
+            name = name_element.get(f"{W}val")
+            if name:
+                mapping[name.strip().lower()] = style_id
+        aliases_element = style.find(f"{W}aliases")
+        if aliases_element is not None:
+            aliases = aliases_element.get(f"{W}val", "")
+            for alias in aliases.split(","):
+                normalized = alias.strip().lower()
+                if normalized:
+                    mapping[normalized] = style_id
+    return mapping
+
+
+def _resolve_paragraph_style_id(candidates: tuple[str, ...], paragraph_styles: dict[str, str]) -> str | None:
+    for candidate in candidates:
+        style_id = paragraph_styles.get(candidate.strip().lower())
+        if style_id is not None:
+            return style_id
+    return None
 
 
 def _set_empty_child(parent: ET.Element, tag: str) -> bool:
@@ -546,15 +599,6 @@ def _length_to_points(raw: str) -> float | None:
     return None
 
 
-def _font_size_to_half_points(raw: str | None) -> int | None:
-    if raw is None:
-        return None
-    points = _length_to_points(raw)
-    if points is None:
-        return None
-    return int(round(points * 2))
-
-
 def _length_to_twips(raw: str) -> int | None:
     points = _length_to_points(raw)
     if points is None:
@@ -605,25 +649,6 @@ def _map_text_align(value: str) -> str:
     if normalized == "justify":
         return "both"
     return "left"
-
-
-def _normalize_font_family(value: str | None) -> str | None:
-    if value is None:
-        return None
-    primary = value.split(",", maxsplit=1)[0].strip().strip("\"'")
-    return primary or None
-
-
-def _is_bold_font_weight(value: str | None) -> bool:
-    if value is None:
-        return False
-    normalized = value.strip().lower()
-    if normalized == "bold":
-        return True
-    try:
-        return int(normalized) >= 600
-    except ValueError:
-        return False
 
 
 def _register_namespaces(xml_bytes: bytes) -> None:

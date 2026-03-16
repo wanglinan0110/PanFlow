@@ -24,7 +24,7 @@ build = ["pyinstaller>=6.0"]
 
 # 安装后暴露的命令行入口。
 [project.scripts]
-panflow = "panflow_service.cli:main"
+mdToWord = "panflow_service.cli:main"
 
 # setuptools 的源码布局配置：项目源码统一放在 src/ 目录下。
 [tool.setuptools]

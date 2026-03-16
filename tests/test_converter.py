@@ -4,6 +4,7 @@
 """
 
 from contextlib import redirect_stderr
+from importlib.util import module_from_spec, spec_from_file_location
 from io import StringIO
 from pathlib import Path
 import sys
@@ -95,9 +96,9 @@ class ConverterTestCase(unittest.TestCase):
             # 人工拼出一个最小 bundle 目录结构，模拟 PyInstaller 解包后的资源布局。
             examples_dir = bundle_root / "examples"
             examples_dir.mkdir()
-            (examples_dir / "business.py").write_text(
+            (examples_dir / "template_a.py").write_text(
                 "def render_document(markdown, metadata, config, context):\n"
-                '    return {"content": "<p>demo</p>", "input_format": "html", "template_style": "business"}\n',
+                '    return {"content": "<p>demo</p>", "input_format": "html", "template_style": "template_a"}\n',
                 encoding="utf-8",
             )
             templates_dir = bundle_root / "templates"
@@ -122,32 +123,32 @@ class ConverterTestCase(unittest.TestCase):
     def test_parse_markdown_document_supports_toml_front_matter(self) -> None:
         document = parse_markdown_document(
             "+++\n"
-            'template_style = "business"\n'
+            'template_style = "template_a"\n'
             "+++\n"
             "# Body\n",
         )
 
-        self.assertEqual(document.metadata["template_style"], "business")
+        self.assertEqual(document.metadata["template_style"], "template_a")
         self.assertEqual(document.body, "# Body\n")
         self.assertEqual(len(document.sections), 1)
-        self.assertEqual(document.sections[0].metadata["template_style"], "business")
+        self.assertEqual(document.sections[0].metadata["template_style"], "template_a")
 
     def test_parse_markdown_document_supports_multiple_template_sections(self) -> None:
         document = parse_markdown_document(
             "+++\n"
-            'template_style = "business"\n'
+            'template_style = "template_a"\n'
             "+++\n"
             "# A\n"
             "+++\n"
-            'template_style = "business_alt"\n'
+            'template_style = "template_b"\n'
             "+++\n"
             "# B\n",
         )
 
-        self.assertEqual(document.metadata["template_style"], "business")
+        self.assertEqual(document.metadata["template_style"], "template_a")
         self.assertEqual(len(document.sections), 2)
-        self.assertEqual(document.sections[0].metadata["template_style"], "business")
-        self.assertEqual(document.sections[1].metadata["template_style"], "business_alt")
+        self.assertEqual(document.sections[0].metadata["template_style"], "template_a")
+        self.assertEqual(document.sections[1].metadata["template_style"], "template_b")
         self.assertEqual(document.sections[0].body, "# A\n")
         self.assertEqual(document.sections[1].body, "# B\n")
         self.assertEqual(document.body, "# A\n# B\n")
@@ -156,14 +157,14 @@ class ConverterTestCase(unittest.TestCase):
     def test_build_document_result_uses_standard_protocol(self) -> None:
         result = build_document_result(
             "<h1>Demo</h1>\n",
-            template_style="business",
+            template_style="template_a",
             font_family="仿宋",
             font_size="12pt",
         )
 
         self.assertEqual(result["content"], "<h1>Demo</h1>\n")
         self.assertEqual(result["input_format"], "html")
-        self.assertEqual(result["template_style"], "business")
+        self.assertEqual(result["template_style"], "template_a")
         self.assertEqual(result["font_family"], "仿宋")
         self.assertEqual(result["font_size"], "12pt")
 
@@ -195,7 +196,7 @@ class ConverterTestCase(unittest.TestCase):
             # markdown 文件名是 a.md，下面故意只提供 a.py，验证“同名脚本命中”规则。
             markdown_path.write_text(
                 "+++\n"
-                'template_style = "business"\n'
+                'template_style = "template_a"\n'
                 "+++\n"
                 "# content\n",
                 encoding="utf-8",
@@ -236,30 +237,30 @@ class ConverterTestCase(unittest.TestCase):
             # 这里构造两段不同 template_style，验证 section 级分发而不是整文件只命中一个脚本。
             markdown_path.write_text(
                 "+++\n"
-                'template_style = "business"\n'
+                'template_style = "template_a"\n'
                 "+++\n"
                 "# first\n"
                 "+++\n"
-                'template_style = "business_alt"\n'
+                'template_style = "template_b"\n'
                 "+++\n"
                 "# second\n",
                 encoding="utf-8",
             )
-            (examples_dir / "business.py").write_text(
+            (examples_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
-                        '    return {"content": "<div>business-section</div>", "input_format": "html", "template_style": "business"}',
+                        '    return {"content": "<div>template-a-section</div>", "input_format": "html", "template_style": "template_a"}',
                     ],
                 )
                 + "\n",
                 encoding="utf-8",
             )
-            (examples_dir / "business_alt.py").write_text(
+            (examples_dir / "template_b.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
-                        '    return {"content": "<div>business-alt-section</div>", "input_format": "html", "template_style": "business_alt"}',
+                        '    return {"content": "<div>template-b-section</div>", "input_format": "html", "template_style": "template_b"}',
                     ],
                 )
                 + "\n",
@@ -275,10 +276,10 @@ class ConverterTestCase(unittest.TestCase):
                 temp_dir=temp_path / "tmp",
             )
 
-            # 第一段和第二段应该分别命中 business.py / business_alt.py，
+            # 第一段和第二段应该分别命中 template_a.py / template_b.py，
             # 两段之间还要自动插入分页占位。
-            self.assertIn("business-section", result.content)
-            self.assertIn("business-alt-section", result.content)
+            self.assertIn("template-a-section", result.content)
+            self.assertIn("template-b-section", result.content)
             self.assertIn("page-break-before: always;", result.content)
             self.assertEqual(result.input_format, "html")
             self.assertIsNone(result.reference_doc)
@@ -289,19 +290,19 @@ class ConverterTestCase(unittest.TestCase):
             examples_dir = temp_path / "examples"
             examples_dir.mkdir()
             markdown_path = temp_path / "a.md"
-            # 这里故意不提供 a.py，只提供 business.py，验证 convert 流程仍能命中 template_style 脚本。
+            # 这里故意不提供 a.py，只提供 template_a.py，验证 convert 流程仍能命中 template_style 脚本。
             markdown_path.write_text(
                 "+++\n"
-                'template_style = "business"\n'
+                'template_style = "template_a"\n'
                 "+++\n"
                 "# first\n",
                 encoding="utf-8",
             )
-            (examples_dir / "business.py").write_text(
+            (examples_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
-                        '    return {"content": "<div>styled-section</div>", "input_format": "html", "template_style": "business"}',
+                        '    return {"content": "<div>styled-section</div>", "input_format": "html", "template_style": "template_a"}',
                     ],
                 )
                 + "\n",
@@ -326,15 +327,15 @@ class ConverterTestCase(unittest.TestCase):
             examples_dir = temp_path / "examples"
             examples_dir.mkdir()
             markdown_path = temp_path / "a.md"
-            # markdown 声明了 business / business_alt，但 examples/ 中只提供 a.py，
+            # markdown 声明了 template_a / template_b，但 examples/ 中只提供 a.py，
             # 用来验证“缺模板时回退到同名脚本”的容错行为。
             markdown_path.write_text(
                 "+++\n"
-                'template_style = "business"\n'
+                'template_style = "template_a"\n'
                 "+++\n"
                 "# first\n"
                 "+++\n"
-                'template_style = "business_alt"\n'
+                'template_style = "template_b"\n'
                 "+++\n"
                 "# second\n",
                 encoding="utf-8",
@@ -363,8 +364,8 @@ class ConverterTestCase(unittest.TestCase):
                 )
 
             # 当 template_style 对应脚本不存在时，应回退到同名脚本 a.py，而不是直接报错。
-            self.assertIn("business-fallback", result.content)
-            self.assertIn("business_alt-fallback", result.content)
+            self.assertIn("template_a-fallback", result.content)
+            self.assertIn("template_b-fallback", result.content)
             self.assertIn("falling back to the same-name companion processor", stderr.getvalue())
             self.assertIsNone(result.reference_doc)
 
@@ -378,16 +379,16 @@ class ConverterTestCase(unittest.TestCase):
             # 当前工程目录不创建 examples/，强制资源查找走 bundle 回退路径。
             markdown_path.write_text(
                 "+++\n"
-                'template_style = "business"\n'
+                'template_style = "template_a"\n'
                 "+++\n"
                 "# first\n",
                 encoding="utf-8",
             )
-            (examples_dir / "business.py").write_text(
+            (examples_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
-                        '    return {"content": "<div>bundled-business</div>", "input_format": "html", "template_style": "business"}',
+                        '    return {"content": "<div>bundled-template-a</div>", "input_format": "html", "template_style": "template_a"}',
                     ],
                 )
                 + "\n",
@@ -406,7 +407,7 @@ class ConverterTestCase(unittest.TestCase):
                 )
 
             # 当前工程没有 examples/ 时，应该能回退到 bundle 里的 examples/。
-            self.assertIn("bundled-business", result.content)
+            self.assertIn("bundled-template-a", result.content)
             self.assertEqual(result.input_format, "html")
 
     def test_unknown_template_style_only_prints_warning_and_skips_section(self) -> None:
@@ -422,16 +423,16 @@ class ConverterTestCase(unittest.TestCase):
                 "+++\n"
                 "# skipped\n"
                 "+++\n"
-                'template_style = "business"\n'
+                'template_style = "template_a"\n'
                 "+++\n"
                 "# kept\n",
                 encoding="utf-8",
             )
-            (examples_dir / "business.py").write_text(
+            (examples_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
-                        '    return {"content": "<div>kept-section</div>", "input_format": "html", "template_style": "business"}',
+                        '    return {"content": "<div>kept-section</div>", "input_format": "html", "template_style": "template_a"}',
                     ],
                 )
                 + "\n",
@@ -456,11 +457,10 @@ class ConverterTestCase(unittest.TestCase):
             self.assertNotIn("skipped", result.content)
             self.assertIsNone(result.reference_doc)
 
-    # 这个测试直接走仓库内真实示例文件，目的是锁定“实际业务样例”当前输出长什么样。
-    def test_business_markdown_companion_processor_renders_table_html(self) -> None:
-        business_md = self.project_root / "examples" / "business.md"
-        # 这里不再手写最小工程，而是直接验证仓库自带样例在当前版本下的真实输出。
-        companion = discover_companion_document(business_md)
+    def test_design_doc_markdown_companion_processor_dispatches_json_tables(self) -> None:
+        design_doc_md = self.project_root / "examples" / "design_doc.md"
+        # 这条用真实样例锁定“json:表格类型 -> 多个 py 脚本”的分发表现。
+        companion = discover_companion_document(design_doc_md)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             result = render_with_companion_processor(
@@ -471,27 +471,62 @@ class ConverterTestCase(unittest.TestCase):
                 temp_dir=Path(temp_dir),
             )
 
-        # 这里是一个“综合性快照断言”：
-        # 标题、分页、section class、表格样式和业务文本都应该同时出现。
+        # design_doc 不是 template_style 分段，而是同名脚本扫描整篇 Markdown，
+        # 把不同 json:类型 代码块替换成对应 HTML 表格。
         self.assertEqual(result.input_format, "html")
-        self.assertEqual(len(companion.document.sections), 2)
-        self.assertGreaterEqual(result.content.count("font-family:"), 6)
-        self.assertIn("<h1", result.content)
-        for section in companion.document.sections:
-            template_style = str(section.metadata["template_style"])
-            # 这里直接对齐示例文件里的真实 template_style，避免测试和 examples/business.md 脱节。
-            self.assertIn(f'data-template-style="{template_style}"', result.content)
-            self.assertIn(f'class="pf-section pf-section-{template_style}"', result.content)
-        self.assertIn('page-break-before: always;', result.content)
-        self.assertGreaterEqual(result.content.count('class="pf-table pf-testcase-table"'), 2)
-        self.assertIn('class="pf-table pf-testcase-table"', result.content)
-        self.assertIn("border-collapse: collapse;", result.content)
-        self.assertIn("border: 1px solid #000000;", result.content)
-        self.assertIn("vertical-align: middle;", result.content)
-        self.assertIn("line-height: 1.6;", result.content)
-        self.assertIn("padding: 6pt 8pt;", result.content)
-        self.assertIn("BCMI评估数据接口适配建模", result.content)
+        self.assertEqual(result.content.count('class="pf-table pf-design-doc-table'), 8)
+        self.assertIn('data-json-block-type="normal_type"', result.content)
+        self.assertIn('data-json-block-type="static_analysis"', result.content)
+        self.assertIn('data-json-block-type="test_case"', result.content)
+        self.assertIn('data-json-block-type="traceability_matrix"', result.content)
+        self.assertIn('style="text-align: center;">表6 功能项1测试用例表</div>', result.content)
+        self.assertIn("<h1>软件系统测试详细设计说明书</h1>", result.content)
+        self.assertIn("软件系统测试详细设计说明书", result.content)
+        self.assertIn("BCMI 评估数据接口适配建模", result.content)
+        self.assertIn("需求与测试用例追踪矩阵", result.content)
+        self.assertNotIn(" || ", result.content)
+        self.assertNotIn("```json:", result.content)
         self.assertIsNone(result.reference_doc)
+
+    def test_design_doc_script_keeps_plain_body_indentation(self) -> None:
+        module_path = self.project_root / "examples" / "design_doc.py"
+        spec = spec_from_file_location("panflow_design_doc_test_module", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        result = module.render_document(
+            "# 标题\n左侧字段 || 右侧字段\n",
+            {},
+            {},
+            {},
+        )
+
+        self.assertEqual(result["input_format"], "html")
+        self.assertIn("<h1>标题</h1>", result["content"])
+        self.assertIn("\u00A0\u00A0\u00A0\u00A0左侧字段 || 右侧字段", result["content"])
+
+    def test_design_doc_script_supports_text_center_lines(self) -> None:
+        module_path = self.project_root / "examples" / "design_doc.py"
+        spec = spec_from_file_location("panflow_design_doc_center_module", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        result = module.render_document(
+            "# 标题\ntext-center 当前行居中\n<text-center>包裹居中</text-center>\n",
+            {},
+            {},
+            {},
+        )
+
+        self.assertEqual(result["input_format"], "html")
+        self.assertIn('<div style="text-align: center;">当前行居中</div>', result["content"])
+        self.assertIn('<div style="text-align: center;">包裹居中</div>', result["content"])
+        self.assertNotIn("text-center 当前行居中", result["content"])
+        self.assertNotIn("<text-center>", result["content"])
 
     # 最后一组测试是 docx 后处理，直接验证 Word XML 是否被正确改写。
     def test_docx_postprocess_writes_real_table_borders_from_html(self) -> None:
@@ -540,6 +575,30 @@ class ConverterTestCase(unittest.TestCase):
         self.assertIn('w:top w:w="120" w:type="dxa"', updated_xml)
         self.assertIn('w:left w:w="160" w:type="dxa"', updated_xml)
         self.assertNotIn("w:tblStyle", updated_xml)
+
+    def test_docx_postprocess_applies_center_alignment_from_div_blocks(self) -> None:
+        html = '<div style="text-align: center;">当前行居中</div>'
+        document_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            "<w:body>"
+            "<w:p><w:pPr /><w:r><w:t>当前行居中</w:t></w:r></w:p>"
+            "</w:body>"
+            "</w:document>"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docx_path = Path(temp_dir) / "center.docx"
+            with ZipFile(docx_path, "w", compression=ZIP_DEFLATED) as docx_file:
+                docx_file.writestr("word/document.xml", document_xml)
+
+            changed = apply_html_table_styles_to_docx(html, docx_path)
+
+            self.assertTrue(changed)
+            with ZipFile(docx_path, "r") as docx_file:
+                updated_xml = docx_file.read("word/document.xml").decode("utf-8")
+
+        self.assertIn('w:jc w:val="center"', updated_xml)
 
 
 if __name__ == "__main__":

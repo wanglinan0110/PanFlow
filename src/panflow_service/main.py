@@ -93,7 +93,7 @@ def _convert_with_companion_processor(
             input_format=result.input_format,
             reference_doc=result.reference_doc or config.pandoc.reference_doc,
         )
-        if result.input_format == "html":
+        if result.input_format == "html" and output_path.exists():
             # pandoc 对复杂 HTML 表格的 CSS 支持不完整，这里把边框和单元格样式回填到 docx。
             apply_html_table_styles_to_docx(result.content, output_path)
         return output_path

@@ -14,7 +14,7 @@ from panflow_service.main import convert_markdown_file, render_markdown_file
 def build_parser() -> argparse.ArgumentParser:
     # CLI 只暴露两条主线命令：渲染中间产物、转换 Word。
     parser = argparse.ArgumentParser(
-        prog="panflow",
+        prog="mdToWord",
         description="Render template-driven Markdown into HTML and convert Markdown to Word via pandoc.",
     )
     # 子命令拆分成 render / convert，便于单独调试各阶段。
@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    # 为了让 `panflow demo.md` 这种最短命令成立，这里把裸参数归一化成 convert。
+    # 为了让 `mdToWord demo.md` 这种最短命令成立，这里把裸参数归一化成 convert。
     normalized_argv = _normalize_argv_for_default_convert(raw_argv)
     args = parser.parse_args(normalized_argv)
     project_root = Path.cwd()
