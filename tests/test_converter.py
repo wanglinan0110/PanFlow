@@ -662,6 +662,54 @@ class ConverterTestCase(unittest.TestCase):
 
         self.assertIn('w:jc w:val="center"', updated_xml)
 
+    def test_docx_postprocess_applies_decimal_numbering_to_headings(self) -> None:
+        html = "<h1>标题</h1>"
+        document_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            "<w:body>"
+            '<w:p><w:pPr><w:pStyle w:val="2" /></w:pPr><w:r><w:t>标题</w:t></w:r></w:p>'
+            "</w:body>"
+            "</w:document>"
+        )
+        styles_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:style w:type="paragraph" w:styleId="2">'
+            '<w:name w:val="heading 1" />'
+            '<w:pPr><w:numPr><w:ilvl w:val="0" /><w:numId w:val="1" /></w:numPr></w:pPr>'
+            "</w:style>"
+            "</w:styles>"
+        )
+        numbering_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:abstractNum w:abstractNumId="16">'
+            '<w:lvl w:ilvl="0"><w:lvlText w:val="%1 " /></w:lvl>'
+            '<w:lvl w:ilvl="1"><w:lvlText w:val="%1.%2 " /></w:lvl>'
+            '<w:lvl w:ilvl="2"><w:lvlText w:val="%1.%2.%3 " /></w:lvl>'
+            "</w:abstractNum>"
+            '<w:num w:numId="16"><w:abstractNumId w:val="16" /></w:num>'
+            "</w:numbering>"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docx_path = Path(temp_dir) / "heading.docx"
+            with ZipFile(docx_path, "w", compression=ZIP_DEFLATED) as docx_file:
+                docx_file.writestr("word/document.xml", document_xml)
+                docx_file.writestr("word/styles.xml", styles_xml)
+                docx_file.writestr("word/numbering.xml", numbering_xml)
+
+            changed = apply_html_table_styles_to_docx(html, docx_path)
+
+            self.assertTrue(changed)
+            with ZipFile(docx_path, "r") as docx_file:
+                updated_document_xml = docx_file.read("word/document.xml").decode("utf-8")
+
+        self.assertIn('w:pStyle w:val="2"', updated_document_xml)
+        self.assertIn('w:numId w:val="16"', updated_document_xml)
+        self.assertIn('w:ilvl w:val="0"', updated_document_xml)
+
 
 if __name__ == "__main__":
     unittest.main()

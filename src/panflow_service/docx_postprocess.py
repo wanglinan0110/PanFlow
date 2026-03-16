@@ -91,10 +91,20 @@ def apply_html_table_styles_to_docx(html: str, docx_path: Path) -> bool:
     with ZipFile(docx_path, "r") as docx_file:
         document_xml = docx_file.read("word/document.xml")
         try:
-            paragraph_styles = _extract_paragraph_style_ids(docx_file.read("word/styles.xml"))
+            styles_xml = docx_file.read("word/styles.xml")
+            paragraph_styles = _extract_paragraph_style_ids(styles_xml)
         except KeyError:
             paragraph_styles = {}
-        updated_xml = _apply_block_specs_to_document_xml(document_xml, block_specs, paragraph_styles)
+        try:
+            heading_numbering_num_id = _extract_heading_numbering_num_id(docx_file.read("word/numbering.xml"))
+        except KeyError:
+            heading_numbering_num_id = None
+        updated_xml = _apply_block_specs_to_document_xml(
+            document_xml,
+            block_specs,
+            paragraph_styles,
+            heading_numbering_num_id=heading_numbering_num_id,
+        )
         if updated_xml == document_xml:
             return False
 
@@ -224,6 +234,8 @@ def _apply_block_specs_to_document_xml(
     document_xml: bytes,
     block_specs: list[BlockSpec],
     paragraph_styles: dict[str, str],
+    *,
+    heading_numbering_num_id: int | None = None,
 ) -> bytes:
     # HTML 块和 Word XML 块按顺序对齐，只在类型匹配时写入样式。
     _register_namespaces(document_xml)
@@ -246,7 +258,12 @@ def _apply_block_specs_to_document_xml(
             if _apply_table_spec(xml_block, block_spec.table, paragraph_styles):
                 changed = True
         if block_spec.kind == "paragraph" and block_spec.paragraph is not None:
-            if _apply_paragraph_spec(xml_block, block_spec.paragraph, paragraph_styles):
+            if _apply_paragraph_spec(
+                xml_block,
+                block_spec.paragraph,
+                paragraph_styles,
+                heading_numbering_num_id=heading_numbering_num_id,
+            ):
                 changed = True
         block_index += 1
         xml_index += 1
@@ -339,6 +356,8 @@ def _apply_paragraph_spec(
     paragraph: ET.Element,
     spec: ParagraphStyleSpec,
     paragraph_styles: dict[str, str],
+    *,
+    heading_numbering_num_id: int | None = None,
 ) -> bool:
     # 段落层只处理对齐和行距，避免把字体/字号固化成 run 级直接格式，影响 WPS 样式编辑。
     changed = False
@@ -346,6 +365,9 @@ def _apply_paragraph_spec(
     style_id = _resolve_paragraph_style_id(spec.style_candidates, paragraph_styles)
     if style_id is not None:
         changed |= _set_attr_child(paragraph_pr, "pStyle", {"val": style_id})
+    heading_level = _extract_heading_level(spec.style_candidates)
+    if heading_level is not None and heading_numbering_num_id is not None:
+        changed |= _set_num_pr(paragraph_pr, num_id=heading_numbering_num_id, ilvl=heading_level - 1)
     if spec.text_align is not None:
         changed |= _set_attr_child(paragraph_pr, "jc", {"val": _map_text_align(spec.text_align)})
     spacing = _line_height_to_spacing(spec.line_height, spec.font_size)
@@ -445,6 +467,48 @@ def _extract_paragraph_style_ids(styles_xml: bytes) -> dict[str, str]:
     return mapping
 
 
+def _extract_heading_level(style_candidates: tuple[str, ...]) -> int | None:
+    for candidate in style_candidates:
+        normalized = candidate.strip().lower()
+        if normalized.startswith("heading "):
+            suffix = normalized.removeprefix("heading ").strip()
+            if suffix.isdigit():
+                return int(suffix)
+    return None
+
+
+def _extract_heading_numbering_num_id(numbering_xml: bytes) -> int | None:
+    root = ET.fromstring(numbering_xml)
+    abstract_num_id = None
+    for abstract_num in root.findall(f"{W}abstractNum"):
+        current_abstract_num_id = abstract_num.get(f"{W}abstractNumId")
+        if current_abstract_num_id is None:
+            continue
+        level_zero = abstract_num.find(f"{W}lvl[@{W}ilvl='0']")
+        if level_zero is None:
+            continue
+        level_text = level_zero.find(f"{W}lvlText")
+        if level_text is None:
+            continue
+        if level_text.get(f"{W}val") == "%1 ":
+            abstract_num_id = current_abstract_num_id
+            break
+    if abstract_num_id is None:
+        return None
+
+    for num in root.findall(f"{W}num"):
+        num_id = num.get(f"{W}numId")
+        abstract_num_ref = num.find(f"{W}abstractNumId")
+        if num_id is None or abstract_num_ref is None:
+            continue
+        if abstract_num_ref.get(f"{W}val") == abstract_num_id:
+            try:
+                return int(num_id)
+            except ValueError:
+                return None
+    return None
+
+
 def _resolve_paragraph_style_id(candidates: tuple[str, ...], paragraph_styles: dict[str, str]) -> str | None:
     for candidate in candidates:
         style_id = paragraph_styles.get(candidate.strip().lower())
@@ -476,6 +540,14 @@ def _remove_child(parent: ET.Element, tag: str) -> bool:
         return False
     parent.remove(child)
     return True
+
+
+def _set_num_pr(parent: ET.Element, *, num_id: int, ilvl: int) -> bool:
+    num_pr = _ensure_child(parent, "numPr")
+    changed = False
+    changed |= _set_attr_child(num_pr, "ilvl", {"val": str(ilvl)})
+    changed |= _set_attr_child(num_pr, "numId", {"val": str(num_id)})
+    return changed
 
 
 def _parse_style_map(style: str) -> dict[str, str]:
