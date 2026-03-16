@@ -528,6 +528,68 @@ class ConverterTestCase(unittest.TestCase):
         self.assertNotIn("text-center 当前行居中", result["content"])
         self.assertNotIn("<text-center>", result["content"])
 
+    def test_design_doc_static_analysis_merges_adjacent_same_merge_level_rows(self) -> None:
+        module_path = self.project_root / "examples" / "design_doc_static_analysis.py"
+        spec = spec_from_file_location("panflow_design_doc_static_analysis_module", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        html = module.render_table(
+            {
+                "keys": [
+                    {"name": "test_name", "description": "测试项名称", "isMergeKey": True},
+                    {"name": "results", "description": "分析结果"},
+                    {"name": "merge_level", "description": "合并级别"},
+                ],
+                "values": [
+                    {"test_name": "同组A", "results": "结果1", "merge_level": 1},
+                    {"test_name": "同组A", "results": "结果2", "merge_level": 1},
+                    {"test_name": "单独B", "results": "结果3", "merge_level": 2},
+                ],
+            },
+            table_index=1,
+            block_index=1,
+            context={},
+        )
+
+        self.assertIn('rowspan="2"', html)
+        self.assertEqual(html.count(">同组A</td>"), 1)
+        self.assertIn(">结果1</td>", html)
+        self.assertIn(">结果2</td>", html)
+        self.assertIn(">单独B</td>", html)
+
+    def test_design_doc_normal_type_prepends_sequence_column(self) -> None:
+        module_path = self.project_root / "examples" / "design_doc_normal_type.py"
+        spec = spec_from_file_location("panflow_design_doc_normal_type_module", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        html = module.render_table(
+            {
+                "keys": [
+                    {"name": "name", "description": "名称"},
+                ],
+                "values": [
+                    {"name": "第一行"},
+                    {"name": "第二行"},
+                ],
+            },
+            table_index=1,
+            block_index=1,
+            context={},
+        )
+
+        self.assertIn(">序号</th>", html)
+        self.assertIn(">1</td>", html)
+        self.assertIn(">2</td>", html)
+        self.assertIn(">第一行</td>", html)
+        self.assertIn(">第二行</td>", html)
+        self.assertIn("text-align: center", html)
+
     # 最后一组测试是 docx 后处理，直接验证 Word XML 是否被正确改写。
     def test_docx_postprocess_writes_real_table_borders_from_html(self) -> None:
         html = (

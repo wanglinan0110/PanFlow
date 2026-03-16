@@ -19,21 +19,25 @@ def render_table(
     if not isinstance(rows, list):
         raise ValueError(f"json:normal_type block #{block_index} 'values' must be a list.")
 
-    header_html = "".join(
+    header_html = (
+        '<th style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">序号</th>'
+        + "".join(
         f'<th style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">{escape(description)}</th>'
         for _, description in columns
+        )
     )
     body_rows = rows or [{}]
     body_html = "".join(
         "<tr>"
+        + f'<td style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">{row_index}</td>'
         + "".join(
             f'<td style="border: 1px solid #000000; padding: 6pt 8pt; text-align: left; vertical-align: middle;">'
-            f'{escape("" if not isinstance(row, dict) else str(row.get(name, ""))).replace("\n", "<br />")}'
+            f'{_render_cell_text(row, name)}'
             "</td>"
             for name, _ in columns
         )
         + "</tr>"
-        for row in body_rows
+        for row_index, row in enumerate(body_rows, start=1)
     )
 
     return (
@@ -70,3 +74,10 @@ def _resolve_columns(payload: dict[str, Any]) -> list[tuple[str, str]]:
     if not columns:
         raise ValueError("json:normal_type must define at least one column in 'keys'.")
     return columns
+
+
+def _render_cell_text(row: object, name: str) -> str:
+    """读取普通单元格文本，并处理换行。"""
+    if not isinstance(row, dict):
+        return ""
+    return escape(str(row.get(name, ""))).replace("\n", "<br />")

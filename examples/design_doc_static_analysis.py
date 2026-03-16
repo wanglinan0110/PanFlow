@@ -19,6 +19,9 @@ def render_table(
     if not isinstance(rows, list):
         raise ValueError(f"json:static_analysis block #{block_index} 'values' must be a list.")
 
+    normalized_rows = [row if isinstance(row, dict) else {} for row in (rows or [{}])]
+    merge_rowspans = _build_merge_rowspans(normalized_rows, merge_key)
+
     header_html = "".join(
         f'<th style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">{escape(description)}</th>'
         for name, description in columns
@@ -26,27 +29,16 @@ def render_table(
     )
 
     body_parts: list[str] = []
-    merge_skip = 0
-    for row in rows or [{}]:
-        if not isinstance(row, dict):
-            row = {}
-
+    for row_index, row in enumerate(normalized_rows):
         body_parts.append("    <tr>")
         for name, _ in columns:
             if name == "merge_level":
                 continue
 
             if name == merge_key:
-                if merge_skip > 0:
-                    merge_skip -= 1
+                rowspan = merge_rowspans[row_index]
+                if rowspan == 0:
                     continue
-                merge_level = row.get("merge_level", 1)
-                try:
-                    rowspan = max(int(merge_level), 1)
-                except (TypeError, ValueError):
-                    rowspan = 1
-                if rowspan > 1:
-                    merge_skip = rowspan - 1
                 rowspan_attr = f' rowspan="{rowspan}"' if rowspan > 1 else ""
                 body_parts.append(
                     f'      <td{rowspan_attr} style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">'
@@ -99,3 +91,29 @@ def _resolve_columns(payload: dict[str, Any]) -> tuple[list[tuple[str, str]], st
     if not columns:
         raise ValueError("json:static_analysis must define at least one column in 'keys'.")
     return columns, merge_key
+
+
+def _build_merge_rowspans(rows: list[dict[str, Any]], merge_key: str | None) -> list[int]:
+    """把相邻且 merge_level 相同的行压成同一组，返回每行对应的 rowspan。"""
+    if merge_key is None:
+        return [1] * len(rows)
+
+    rowspans = [1] * len(rows)
+    row_index = 0
+    while row_index < len(rows):
+        merge_value = rows[row_index].get("merge_level")
+        if merge_value in (None, ""):
+            row_index += 1
+            continue
+
+        group_end = row_index + 1
+        while group_end < len(rows) and rows[group_end].get("merge_level") == merge_value:
+            group_end += 1
+
+        group_size = group_end - row_index
+        rowspans[row_index] = group_size
+        for hidden_index in range(row_index + 1, group_end):
+            rowspans[hidden_index] = 0
+        row_index = group_end
+
+    return rowspans
