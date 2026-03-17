@@ -17,7 +17,7 @@ def render_table(
     columns = _resolve_columns(payload)
     rows = payload.get("values", [])
     if not isinstance(rows, list):
-        raise ValueError(f"json:normal_type block #{block_index} 'values' must be a list.")
+        raise ValueError(f"json:basic_table block #{block_index} 'values' must be a list.")
 
     header_html = (
         '<th style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">序号</th>'
@@ -42,7 +42,7 @@ def render_table(
 
     return (
         f'<table id="design-doc-table-{table_index}" class="pf-table pf-design-doc-table pf-design-doc-normal-type" '
-        'data-json-block-type="normal_type" '
+        'data-json-block-type="basic_table" '
         'style="width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid #000000;">\n'
         "  <thead>\n"
         "    <tr>"
@@ -60,7 +60,7 @@ def _resolve_columns(payload: dict[str, Any]) -> list[tuple[str, str]]:
     """从 keys 配置中提取列名和表头文案。"""
     keys = payload.get("keys", [])
     if not isinstance(keys, list):
-        raise ValueError("json:normal_type 'keys' must be a list.")
+        raise ValueError("json:basic_table 'keys' must be a list.")
 
     columns: list[tuple[str, str]] = []
     for item in keys:
@@ -72,7 +72,7 @@ def _resolve_columns(payload: dict[str, Any]) -> list[tuple[str, str]]:
         description = str(item.get("description", name)).strip() or name
         columns.append((name, description))
     if not columns:
-        raise ValueError("json:normal_type must define at least one column in 'keys'.")
+        raise ValueError("json:basic_table must define at least one column in 'keys'.")
     return columns
 
 

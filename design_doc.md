@@ -34,7 +34,7 @@
 
   KYZW 分系统,见下表1：
 
-   ```json:normal_type
+   ```json:basic_table
    {keys:
    [
     {name:"equipment_type",description:"设备类型"},
@@ -57,7 +57,7 @@
 
  KYZW 分系统,见下表2：
 
-```json:normal_type
+```json:basic_table
 {keys:
    [
     {name:"software_name",description:"软件名称"},
@@ -80,7 +80,7 @@
 
  表3 KYZW 分系统所需其他项
 
-```json:normal_type
+```json:basic_table
 {keys:
    [
     {name:"item_name",description:"项名称"},
@@ -161,7 +161,7 @@
 
  KYZW 分系统包含29个功能模块，共设计290个功能测试用例
 
-```json:normal_type
+```json:basic_table
 {keys:
    [
     {name:"name",description:"测试项名称"},
@@ -182,7 +182,7 @@
 
   表5 KYZW 分系统功能测试用例分布表
 
-  ```json:normal_type
+  ```json:basic_table
 {keys:
    [
     {name:"use_case_id",description:"测试用例标识"},
@@ -285,7 +285,7 @@
 
     见表7 KYZW 分系统需求与测试用例追踪矩阵
 
-```json:traceability_matrix
+```json:traceability_matrix_table
  {
       "header_left": "说明需求",
         "header_right": "CSCI需求",

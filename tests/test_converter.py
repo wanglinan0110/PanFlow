@@ -15,11 +15,13 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from panflow_service.companion import build_document_result, render_heading
 from panflow_service import cli as cli_module
-from panflow_service.config import PandocConfig, ProjectConfig, discover_default_config
+from panflow_service.config import PandocConfig, ProjectConfig, discover_default_config, resolve_runtime_config
 from panflow_service.document_processor import discover_companion_document, parse_markdown_document, render_with_companion_processor
 from panflow_service.docx_postprocess import apply_html_table_styles_to_docx
 from panflow_service.main import convert_markdown_file
 from panflow_service.pandoc import build_pandoc_command
+from panflow_service.runtime_paths import resolve_processors_dir
+from panflow_service.word_to_markdown import convert_word_to_markdown
 
 
 class ConverterTestCase(unittest.TestCase):
@@ -89,14 +91,35 @@ class ConverterTestCase(unittest.TestCase):
             # render 子命令默认产出 `*.rendered.html`，这里直接锁定这个约定。
             self.assertEqual(mocked_render.call_args.args[1], input_path.with_name("demo.rendered.html"))
 
+    def test_cli_reverse_uses_default_output_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "demo.docx"
+            input_path.write_bytes(b"docx")
+            config = ProjectConfig(
+                project_root=temp_path,
+                pandoc=PandocConfig(),
+            )
+
+            with patch.object(cli_module, "resolve_runtime_config", return_value=config), patch.object(
+                cli_module,
+                "convert_word_to_markdown",
+                return_value=(input_path.with_suffix(".html"), input_path.with_suffix(".md")),
+            ) as mocked_reverse:
+                exit_code = cli_module.main(["reverse", str(input_path)])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(mocked_reverse.called)
+            self.assertEqual(mocked_reverse.call_args.args[1], input_path.with_suffix(".md"))
+
     # 这个测试模拟“打包后运行”的环境，确保资源查找不会只在源码目录下工作。
     def test_discover_default_config_uses_bundled_resources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             bundle_root = Path(temp_dir)
             # 人工拼出一个最小 bundle 目录结构，模拟 PyInstaller 解包后的资源布局。
-            examples_dir = bundle_root / "examples"
-            examples_dir.mkdir()
-            (examples_dir / "template_a.py").write_text(
+            processors_dir = bundle_root / "processors"
+            processors_dir.mkdir()
+            (processors_dir / "template_a.py").write_text(
                 "def render_document(markdown, metadata, config, context):\n"
                 '    return {"content": "<p>demo</p>", "input_format": "html", "template_style": "template_a"}\n',
                 encoding="utf-8",
@@ -118,6 +141,51 @@ class ConverterTestCase(unittest.TestCase):
             # 这里重点验证 bundled 的模板和 bundled 的 pandoc 都能被发现。
             self.assertEqual(config.pandoc.reference_doc, (templates_dir / "reference.docx").resolve())
             self.assertEqual(config.pandoc.binary, str((bin_dir / ("pandoc.exe" if sys.platform.startswith("win") else "pandoc")).resolve()))
+
+    def test_resolve_runtime_config_uses_config_next_to_executable_when_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            exe_root = temp_path / "app"
+            exe_root.mkdir()
+            templates_dir = exe_root / "templates"
+            templates_dir.mkdir()
+            (templates_dir / "reference.docx").write_bytes(b"docx")
+            (exe_root / "panflow.toml").write_text(
+                '[pandoc]\n'
+                'binary = "bundled-pandoc"\n'
+                'reference_doc = "templates/reference.docx"\n',
+                encoding="utf-8",
+            )
+
+            with patch.object(sys, "frozen", True, create=True), patch.object(
+                sys,
+                "executable",
+                str(exe_root / ("mdToWord.exe" if sys.platform.startswith("win") else "mdToWord")),
+                create=True,
+            ):
+                config = resolve_runtime_config(temp_path / "workspace")
+
+            self.assertEqual(config.project_root, exe_root.resolve())
+            self.assertEqual(config.pandoc.binary, "bundled-pandoc")
+            self.assertEqual(config.pandoc.reference_doc, (templates_dir / "reference.docx").resolve())
+
+    def test_resolve_processors_dir_uses_executable_adjacent_processors_when_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            exe_root = temp_path / "app"
+            processors_dir = exe_root / "processors"
+            processors_dir.mkdir(parents=True)
+            (processors_dir / "template_a.py").write_text("# demo\n", encoding="utf-8")
+
+            with patch.object(sys, "frozen", True, create=True), patch.object(
+                sys,
+                "executable",
+                str(exe_root / ("mdToWord.exe" if sys.platform.startswith("win") else "mdToWord")),
+                create=True,
+            ):
+                resolved = resolve_processors_dir(temp_path / "workspace")
+
+            self.assertEqual(resolved, processors_dir.resolve())
 
     # 这一组测试专门验证 Markdown front matter 切段逻辑。
     def test_parse_markdown_document_supports_toml_front_matter(self) -> None:
@@ -184,14 +252,45 @@ class ConverterTestCase(unittest.TestCase):
         self.assertIn("font-weight: 700;", html)
         self.assertIn("text-align: center;", html)
 
+    def test_convert_word_to_markdown_runs_docx_to_html_then_html_to_md(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "demo.docx"
+            input_path.write_bytes(b"docx")
+            markdown_path = temp_path / "demo.md"
+            html_path = temp_path / "demo.html"
+            config = ProjectConfig(project_root=temp_path, pandoc=PandocConfig(binary="pandoc"))
+
+            with patch("panflow_service.word_to_markdown.subprocess.run") as mocked_run:
+                result_html, result_markdown = convert_word_to_markdown(
+                    input_path,
+                    markdown_path,
+                    config,
+                    html_output=html_path,
+                )
+
+            self.assertEqual(result_html, html_path.resolve())
+            self.assertEqual(result_markdown, markdown_path.resolve())
+            self.assertEqual(mocked_run.call_count, 2)
+
+            first_command = mocked_run.call_args_list[0].args[0]
+            second_command = mocked_run.call_args_list[1].args[0]
+            self.assertEqual(first_command[0], "pandoc")
+            self.assertIn("docx", first_command)
+            self.assertIn("html", first_command)
+            self.assertEqual(first_command[-1], str(html_path.resolve()))
+            self.assertIn("html", second_command)
+            self.assertIn("gfm-raw_html", second_command)
+            self.assertEqual(second_command[-1], str(markdown_path.resolve()))
+
     # 下面这几组是 companion 模板分发测试。
     # 它们都会临时创建一个“最小工程”，动态写 markdown 和 python 脚本，
     # 然后直接调用 render_with_companion_processor，避免依赖仓库外部状态。
     def test_companion_processor_uses_examples_same_name_py(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            examples_dir = temp_path / "examples"
-            examples_dir.mkdir()
+            processors_dir = temp_path / "processors"
+            processors_dir.mkdir()
             markdown_path = temp_path / "a.md"
             # markdown 文件名是 a.md，下面故意只提供 a.py，验证“同名脚本命中”规则。
             markdown_path.write_text(
@@ -201,7 +300,7 @@ class ConverterTestCase(unittest.TestCase):
                 "# content\n",
                 encoding="utf-8",
             )
-            (examples_dir / "a.py").write_text(
+            (processors_dir / "a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
@@ -231,8 +330,8 @@ class ConverterTestCase(unittest.TestCase):
     def test_companion_processor_dispatches_sections_by_template_style_script(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            examples_dir = temp_path / "examples"
-            examples_dir.mkdir()
+            processors_dir = temp_path / "processors"
+            processors_dir.mkdir()
             markdown_path = temp_path / "a.md"
             # 这里构造两段不同 template_style，验证 section 级分发而不是整文件只命中一个脚本。
             markdown_path.write_text(
@@ -246,7 +345,7 @@ class ConverterTestCase(unittest.TestCase):
                 "# second\n",
                 encoding="utf-8",
             )
-            (examples_dir / "template_a.py").write_text(
+            (processors_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
@@ -256,7 +355,7 @@ class ConverterTestCase(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            (examples_dir / "template_b.py").write_text(
+            (processors_dir / "template_b.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
@@ -287,8 +386,8 @@ class ConverterTestCase(unittest.TestCase):
     def test_convert_uses_template_style_processor_even_without_same_name_py(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            examples_dir = temp_path / "examples"
-            examples_dir.mkdir()
+            processors_dir = temp_path / "processors"
+            processors_dir.mkdir()
             markdown_path = temp_path / "a.md"
             # 这里故意不提供 a.py，只提供 template_a.py，验证 convert 流程仍能命中 template_style 脚本。
             markdown_path.write_text(
@@ -298,7 +397,7 @@ class ConverterTestCase(unittest.TestCase):
                 "# first\n",
                 encoding="utf-8",
             )
-            (examples_dir / "template_a.py").write_text(
+            (processors_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
@@ -324,10 +423,10 @@ class ConverterTestCase(unittest.TestCase):
     def test_template_style_falls_back_to_same_name_processor_when_style_script_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            examples_dir = temp_path / "examples"
-            examples_dir.mkdir()
+            processors_dir = temp_path / "processors"
+            processors_dir.mkdir()
             markdown_path = temp_path / "a.md"
-            # markdown 声明了 template_a / template_b，但 examples/ 中只提供 a.py，
+            # markdown 声明了 template_a / template_b，但 processors/ 中只提供 a.py，
             # 用来验证“缺模板时回退到同名脚本”的容错行为。
             markdown_path.write_text(
                 "+++\n"
@@ -340,7 +439,7 @@ class ConverterTestCase(unittest.TestCase):
                 "# second\n",
                 encoding="utf-8",
             )
-            (examples_dir / "a.py").write_text(
+            (processors_dir / "a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
@@ -373,10 +472,10 @@ class ConverterTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             bundle_root = temp_path / "bundle"
-            examples_dir = bundle_root / "examples"
-            examples_dir.mkdir(parents=True)
+            processors_dir = bundle_root / "processors"
+            processors_dir.mkdir(parents=True)
             markdown_path = temp_path / "a.md"
-            # 当前工程目录不创建 examples/，强制资源查找走 bundle 回退路径。
+            # 当前工程目录不创建 processors/，强制资源查找走 bundle 回退路径。
             markdown_path.write_text(
                 "+++\n"
                 'template_style = "template_a"\n'
@@ -384,7 +483,7 @@ class ConverterTestCase(unittest.TestCase):
                 "# first\n",
                 encoding="utf-8",
             )
-            (examples_dir / "template_a.py").write_text(
+            (processors_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
@@ -396,7 +495,7 @@ class ConverterTestCase(unittest.TestCase):
             )
 
             companion = discover_companion_document(markdown_path)
-            # 通过补丁模拟 PyInstaller 环境，让 resolve_examples_dir 命中 bundle_root。
+            # 通过补丁模拟 PyInstaller 环境，让 resolve_processors_dir 命中 bundle_root。
             with patch.object(sys, "_MEIPASS", str(bundle_root), create=True):
                 result = render_with_companion_processor(
                     companion,
@@ -406,15 +505,15 @@ class ConverterTestCase(unittest.TestCase):
                     temp_dir=temp_path / "tmp",
                 )
 
-            # 当前工程没有 examples/ 时，应该能回退到 bundle 里的 examples/。
+            # 当前工程没有 processors/ 时，应该能回退到 bundle 里的 processors/。
             self.assertIn("bundled-template-a", result.content)
             self.assertEqual(result.input_format, "html")
 
     def test_unknown_template_style_only_prints_warning_and_skips_section(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            examples_dir = temp_path / "examples"
-            examples_dir.mkdir()
+            processors_dir = temp_path / "processors"
+            processors_dir.mkdir()
             markdown_path = temp_path / "a.md"
             # 第一段模板不存在，第二段模板存在；测试目标是“跳过坏段，保留好段”。
             markdown_path.write_text(
@@ -428,7 +527,7 @@ class ConverterTestCase(unittest.TestCase):
                 "# kept\n",
                 encoding="utf-8",
             )
-            (examples_dir / "template_a.py").write_text(
+            (processors_dir / "template_a.py").write_text(
                 "\n".join(
                     [
                         "def render_document(markdown, metadata, config, context):",
@@ -458,7 +557,7 @@ class ConverterTestCase(unittest.TestCase):
             self.assertIsNone(result.reference_doc)
 
     def test_design_doc_markdown_companion_processor_dispatches_json_tables(self) -> None:
-        design_doc_md = self.project_root / "examples" / "design_doc.md"
+        design_doc_md = self.project_root / "design_doc.md"
         # 这条用真实样例锁定“json:表格类型 -> 多个 py 脚本”的分发表现。
         companion = discover_companion_document(design_doc_md)
 
@@ -475,10 +574,10 @@ class ConverterTestCase(unittest.TestCase):
         # 把不同 json:类型 代码块替换成对应 HTML 表格。
         self.assertEqual(result.input_format, "html")
         self.assertEqual(result.content.count('class="pf-table pf-design-doc-table'), 8)
-        self.assertIn('data-json-block-type="normal_type"', result.content)
+        self.assertIn('data-json-block-type="basic_table"', result.content)
         self.assertIn('data-json-block-type="static_analysis"', result.content)
         self.assertIn('data-json-block-type="test_case"', result.content)
-        self.assertIn('data-json-block-type="traceability_matrix"', result.content)
+        self.assertIn('data-json-block-type="traceability_matrix_table"', result.content)
         self.assertIn('style="text-align: center;">表6 功能项1测试用例表</div>', result.content)
         self.assertIn("<h1>软件系统测试详细设计说明书</h1>", result.content)
         self.assertIn("软件系统测试详细设计说明书", result.content)
@@ -489,7 +588,7 @@ class ConverterTestCase(unittest.TestCase):
         self.assertIsNone(result.reference_doc)
 
     def test_design_doc_script_keeps_plain_body_indentation(self) -> None:
-        module_path = self.project_root / "examples" / "design_doc.py"
+        module_path = self.project_root / "processors" / "design_doc.py"
         spec = spec_from_file_location("panflow_design_doc_test_module", module_path)
         self.assertIsNotNone(spec)
         self.assertIsNotNone(spec.loader)
@@ -508,7 +607,7 @@ class ConverterTestCase(unittest.TestCase):
         self.assertIn("\u00A0\u00A0\u00A0\u00A0左侧字段 || 右侧字段", result["content"])
 
     def test_design_doc_script_supports_text_center_lines(self) -> None:
-        module_path = self.project_root / "examples" / "design_doc.py"
+        module_path = self.project_root / "processors" / "design_doc.py"
         spec = spec_from_file_location("panflow_design_doc_center_module", module_path)
         self.assertIsNotNone(spec)
         self.assertIsNotNone(spec.loader)
@@ -528,8 +627,52 @@ class ConverterTestCase(unittest.TestCase):
         self.assertNotIn("text-center 当前行居中", result["content"])
         self.assertNotIn("<text-center>", result["content"])
 
+    def test_design_doc_script_uses_executable_adjacent_config_for_relative_renderer_paths(self) -> None:
+        module_path = self.project_root / "processors" / "design_doc.py"
+        spec = spec_from_file_location("panflow_design_doc_external_renderer_module", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            exe_root = temp_path / "release"
+            renderers_dir = exe_root / "renderers"
+            renderers_dir.mkdir(parents=True)
+            (exe_root / "config.json").write_text(
+                '{\n'
+                '  "renderers": {\n'
+                '    "custom_table": "renderers/custom_table.py"\n'
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            (renderers_dir / "custom_table.py").write_text(
+                "def render_table(payload, *, table_index, block_index, context):\n"
+                '    return "<table data-json-block-type=\\"custom_table\\"><tbody><tr><td>外部脚本生效</td></tr></tbody></table>"\n',
+                encoding="utf-8",
+            )
+
+            with patch.object(sys, "frozen", True, create=True), patch.object(
+                sys,
+                "executable",
+                str(exe_root / ("mdToWord.exe" if sys.platform.startswith("win") else "mdToWord")),
+                create=True,
+            ):
+                result = module.render_document(
+                    "```json:custom_table\n{}\n```\n",
+                    {},
+                    {},
+                    {"project_root": str(self.project_root)},
+                )
+
+        self.assertEqual(result["input_format"], "html")
+        self.assertIn('data-json-block-type="custom_table"', result["content"])
+        self.assertIn("外部脚本生效", result["content"])
+
     def test_design_doc_static_analysis_merges_adjacent_same_merge_level_rows(self) -> None:
-        module_path = self.project_root / "examples" / "design_doc_static_analysis.py"
+        module_path = self.project_root / "processors" / "static_analysis_table.py"
         spec = spec_from_file_location("panflow_design_doc_static_analysis_module", module_path)
         self.assertIsNotNone(spec)
         self.assertIsNotNone(spec.loader)
@@ -561,7 +704,7 @@ class ConverterTestCase(unittest.TestCase):
         self.assertIn(">单独B</td>", html)
 
     def test_design_doc_normal_type_prepends_sequence_column(self) -> None:
-        module_path = self.project_root / "examples" / "design_doc_normal_type.py"
+        module_path = self.project_root / "processors" / "basic_table.py"
         spec = spec_from_file_location("panflow_design_doc_normal_type_module", module_path)
         self.assertIsNotNone(spec)
         self.assertIsNotNone(spec.loader)
@@ -589,6 +732,64 @@ class ConverterTestCase(unittest.TestCase):
         self.assertIn(">第一行</td>", html)
         self.assertIn(">第二行</td>", html)
         self.assertIn("text-align: center", html)
+
+    def test_design_doc_test_case_table_steps_always_use_incrementing_sequence(self) -> None:
+        module_path = self.project_root / "processors" / "test_case_table.py"
+        spec = spec_from_file_location("panflow_design_doc_test_case_table_module", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        html = module.render_table(
+            {
+                "steps": [
+                    {"no": "A-01", "input_procedure": "步骤一"},
+                    {"no": "A-02", "input_procedure": "步骤二"},
+                ],
+            },
+            table_index=1,
+            block_index=1,
+            context={},
+        )
+
+        self.assertIn(">1</td>", html)
+        self.assertIn(">2</td>", html)
+        self.assertNotIn(">A-01</td>", html)
+        self.assertNotIn(">A-02</td>", html)
+
+    def test_build_app_finalize_release_layout_copies_external_config_and_logs(self) -> None:
+        module_path = self.project_root / "scripts" / "build_app.py"
+        spec = spec_from_file_location("panflow_build_app_module", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            project_root = temp_path / "project"
+            project_root.mkdir(parents=True)
+            (project_root / "config.json").write_text('{"renderers": {"basic_table": "basic_table.py"}}\n', encoding="utf-8")
+            target_dir = temp_path / "pyinstaller" / "MyService"
+            internal_dir = target_dir / "_internal"
+            internal_dir.mkdir(parents=True)
+            (target_dir / ("MyService.exe" if sys.platform.startswith("win") else "MyService")).write_text(
+                "binary",
+                encoding="utf-8",
+            )
+
+            release_dir = module._finalize_release_layout(
+                project_root,
+                target=target_dir,
+                release_dir_name="MyProject_Release",
+                mode="onedir",
+            )
+
+            self.assertEqual(release_dir, (project_root / "dist" / "MyProject_Release").resolve())
+            self.assertTrue((release_dir / "config.json").exists())
+            self.assertTrue((release_dir / "logs").exists())
+            self.assertTrue((release_dir / "_internal").exists())
 
     # 最后一组测试是 docx 后处理，直接验证 Word XML 是否被正确改写。
     def test_docx_postprocess_writes_real_table_borders_from_html(self) -> None:

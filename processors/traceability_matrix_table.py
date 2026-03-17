@@ -17,12 +17,12 @@ def render_table(
     columns = _resolve_columns(payload)
     rows = payload.get("values", [])
     if not isinstance(rows, list):
-        raise ValueError(f"json:traceability_matrix block #{block_index} 'values' must be a list.")
+        raise ValueError(f"json:traceability_matrix_table block #{block_index} 'values' must be a list.")
 
     left_columns = [column for column in columns if column[2] == "header_left"]
     right_columns = [column for column in columns if column[2] == "header_right"]
     if not left_columns or not right_columns:
-        raise ValueError("json:traceability_matrix must define both header_left and header_right columns.")
+        raise ValueError("json:traceability_matrix_table must define both header_left and header_right columns.")
 
     top_header_html = (
         f'      <th style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;" colspan="{len(left_columns)}">'
@@ -49,7 +49,7 @@ def render_table(
 
     return (
         f'<table id="design-doc-table-{table_index}" class="pf-table pf-design-doc-table pf-design-doc-traceability-matrix" '
-        'data-json-block-type="traceability_matrix" '
+        'data-json-block-type="traceability_matrix_table" '
         'style="width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid #000000;">\n'
         "  <thead>\n"
         "    <tr>\n"
@@ -70,7 +70,7 @@ def _resolve_columns(payload: dict[str, Any]) -> list[tuple[str, str, str]]:
     """读取列定义并保留左右分组信息。"""
     keys = payload.get("keys", [])
     if not isinstance(keys, list):
-        raise ValueError("json:traceability_matrix 'keys' must be a list.")
+        raise ValueError("json:traceability_matrix_table 'keys' must be a list.")
 
     columns: list[tuple[str, str, str]] = []
     for item in keys:
@@ -84,5 +84,5 @@ def _resolve_columns(payload: dict[str, Any]) -> list[tuple[str, str, str]]:
         columns.append((name, description, group))
 
     if not columns:
-        raise ValueError("json:traceability_matrix must define at least one column in 'keys'.")
+        raise ValueError("json:traceability_matrix_table must define at least one column in 'keys'.")
     return columns

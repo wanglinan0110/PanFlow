@@ -9,15 +9,16 @@ from pathlib import Path
 
 from panflow_service.config import resolve_runtime_config
 from panflow_service.main import convert_markdown_file, render_markdown_file
+from panflow_service.word_to_markdown import convert_word_to_markdown
 
 
 def build_parser() -> argparse.ArgumentParser:
-    # CLI 只暴露两条主线命令：渲染中间产物、转换 Word。
+    # CLI 只暴露三条主线命令：渲染中间产物、转换 Word、反向转 Markdown。
     parser = argparse.ArgumentParser(
         prog="mdToWord",
-        description="Render template-driven Markdown into HTML and convert Markdown to Word via pandoc.",
+        description="Render template-driven Markdown into HTML, convert Markdown to Word, or convert Word back to Markdown via pandoc.",
     )
-    # 子命令拆分成 render / convert，便于单独调试各阶段。
+    # 子命令拆分成 render / convert / reverse，便于单独调试各阶段。
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     render_parser = subparsers.add_parser(
@@ -47,6 +48,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional override for pandoc --reference-doc.",
     )
+
+    reverse_parser = subparsers.add_parser(
+        "reverse",
+        aliases=["rev"],
+        help="Convert a .docx file to HTML and then Markdown via pandoc.",
+    )
+    reverse_parser.add_argument("input", type=Path, help="Source .docx file.")
+    reverse_parser.add_argument("-o", "--output", type=Path, help="Target .md file path.")
+    reverse_parser.add_argument("--html-output", type=Path, help="Optional path to keep the intermediate HTML file.")
+    reverse_parser.add_argument("--config", type=Path, help="Path to panflow.toml.")
 
     return parser
 
@@ -81,6 +92,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Word document written to {output_path}")
         return 0
 
+    if args.command in {"reverse", "rev"}:
+        # reverse 是反向链路：先把 Word 转成 HTML，再转换成 Markdown。
+        config = resolve_runtime_config(project_root, args.config)
+        output_path = args.output or args.input.with_suffix(".md")
+        html_path, markdown_path = convert_word_to_markdown(
+            args.input,
+            output_path,
+            config,
+            html_output=args.html_output,
+        )
+        print(f"HTML written to {html_path}")
+        print(f"Markdown written to {markdown_path}")
+        return 0
+
     parser.error(f"Unsupported command: {args.command}")
     return 2
 
@@ -91,6 +116,6 @@ def _normalize_argv_for_default_convert(argv: list[str] | None) -> list[str] | N
         return None
     if not argv:
         return argv
-    if argv[0] in {"render", "r", "convert", "c", "-h", "--help"}:
+    if argv[0] in {"render", "r", "convert", "c", "reverse", "rev", "-h", "--help"}:
         return argv
     return ["convert", *argv]

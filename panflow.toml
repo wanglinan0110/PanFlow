@@ -2,7 +2,7 @@
 # 当前配置主要控制 pandoc 的可执行文件与默认 Word 模板。
 # 目前主输入协议是：
 # 1. markdown 使用 TOML front matter 按 section 划分
-# 2. 每个 section 通过 template_style 选择对应的 examples/*.py 脚本
+# 2. 每个 section 通过 template_style 选择对应的 processors/*.py 脚本
 
 [pandoc]
 # pandoc 可执行文件名或绝对路径。

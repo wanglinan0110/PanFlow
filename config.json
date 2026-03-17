@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "template_style": "design_doc",
+    "purpose": "Map json block types to renderer Python scripts.",
+    "note": "Relative paths are resolved from the directory containing this config.json."
+  },
+  "renderers": {
+    "basic_table": "basic_table.py",
+    "static_analysis": "static_analysis_table.py",
+    "test_case": "test_case_table.py",
+    "traceability_matrix_table": "traceability_matrix_table.py"
+  }
+}

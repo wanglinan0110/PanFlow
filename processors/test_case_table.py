@@ -20,7 +20,7 @@ def render_table(
 
     step_rows_html = "".join(
         f"""    <tr>
-      <td style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">{_text(step.get("no")) or str(index)}</td>
+      <td style="border: 1px solid #000000; padding: 6pt 8pt; text-align: center; vertical-align: middle;">{index}</td>
       <td style="border: 1px solid #000000; padding: 6pt 8pt; text-align: left; vertical-align: middle;" colspan="3">{_text(step.get("input_procedure"))}</td>
       <td style="border: 1px solid #000000; padding: 6pt 8pt; text-align: left; vertical-align: middle;" colspan="3">{_text(step.get("expected_result")) or _text(step.get("expectation"))}</td>
       <td style="border: 1px solid #000000; padding: 6pt 8pt; text-align: left; vertical-align: middle;" colspan="3">{_text(step.get("note"))}</td>

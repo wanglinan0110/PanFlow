@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 
-from panflow_service.runtime_paths import resolve_pandoc_binary, resolve_reference_doc
+from panflow_service.runtime_paths import executable_root, resolve_pandoc_binary, resolve_reference_doc
 
 
 DEFAULT_CONFIG_FILE = "panflow.toml"
@@ -61,9 +61,13 @@ def resolve_runtime_config(project_root: Path, config_path: Path | None = None) 
     if config_path is not None:
         return load_project_config(config_path)
 
-    default_path = project_root / DEFAULT_CONFIG_FILE
-    if default_path.exists():
-        return load_project_config(default_path)
+    candidates = [project_root / DEFAULT_CONFIG_FILE]
+    exe_root = executable_root()
+    if exe_root is not None:
+        candidates.append(exe_root / DEFAULT_CONFIG_FILE)
+    for default_path in candidates:
+        if default_path.exists():
+            return load_project_config(default_path)
 
     return discover_default_config(project_root)
 

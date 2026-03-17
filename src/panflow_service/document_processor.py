@@ -1,6 +1,6 @@
 """companion 模板脚本分发与执行。
 
-这一层负责把 Markdown 按 section 切开，并把每一段交给对应的 `examples/*.py`。
+这一层负责把 Markdown 按 section 切开，并把每一段交给对应的 `processors/*.py`。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import tomllib
 from types import ModuleType
 from typing import Any
 
-from panflow_service.runtime_paths import resolve_examples_dir
+from panflow_service.runtime_paths import resolve_processors_dir
 
 
 class DocumentProcessorError(RuntimeError):
@@ -143,9 +143,9 @@ def render_with_companion_processor(
     # 这是 companion 模式主入口：按 section 选脚本、执行、再把结果汇总。
     available_processor = has_companion_processor(companion, project_root)
     if not available_processor:
-        examples_dir = resolve_examples_dir(project_root)
+        processors_dir = resolve_processors_dir(project_root)
         raise DocumentProcessorError(
-            f"No companion processor found for '{companion.markdown_path.name}'. Expected a matching script under '{examples_dir}'.",
+            f"No companion processor found for '{companion.markdown_path.name}'. Expected a matching script under '{processors_dir}'.",
         )
 
     base_context = {
@@ -360,11 +360,11 @@ def _resolve_processor_path(
     project_root: Path,
 ) -> Path | None:
     # 模板分发规则集中收口在这里，避免多个调用点各自判断。
-    examples_dir = resolve_examples_dir(project_root)
-    default_processor = examples_dir / f"{companion.markdown_path.stem}.py"
+    processors_dir = resolve_processors_dir(project_root)
+    default_processor = processors_dir / f"{companion.markdown_path.stem}.py"
 
     if template_style is not None:
-        style_processor = examples_dir / f"{template_style}.py"
+        style_processor = processors_dir / f"{template_style}.py"
         if style_processor.exists():
             return style_processor.resolve()
         if default_processor.exists():

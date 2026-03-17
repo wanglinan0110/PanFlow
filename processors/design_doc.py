@@ -11,14 +11,18 @@ from types import ModuleType
 from typing import Any, Callable
 
 from panflow_service.companion import build_document_result
+from panflow_service.runtime_paths import executable_root
 
 TEMPLATE_STYLE = "design_doc"
 BODY_INDENT = "\u00A0" * 4
 FENCE_START_PATTERN = re.compile(r"```json:([A-Za-z0-9_]+)")
 CENTER_TAG_PATTERN = re.compile(r"<text-center>(.*?)</text-center>")
 CENTER_PREFIX_PATTERN = re.compile(r"^\s*text-center(?:\s+|:\s*)")
+PRIMARY_RENDERER_CONFIG_FILE = "config.json"
+LEGACY_RENDERER_CONFIG_FILE = "design_doc_renderers.json"
 
 _MODULE_CACHE: dict[Path, ModuleType] = {}
+_CURRENT_CONTEXT: dict[str, object] = {}
 
 
 def render_document(
@@ -28,6 +32,8 @@ def render_document(
     context: dict[str, object],
 ) -> dict[str, str]:
     """把 design_doc.md 中的 json:表格类型 代码块替换成对应 HTML 表格。"""
+    _CURRENT_CONTEXT.clear()
+    _CURRENT_CONTEXT.update(context)
     output_lines, table_placeholders = _replace_json_blocks_with_placeholders(markdown, context)
     content = _render_markdown_lines_as_html(output_lines, table_placeholders).rstrip() + "\n"
     return build_document_result(content, input_format="html", template_style=TEMPLATE_STYLE)
@@ -151,19 +157,80 @@ def _load_renderer(block_type: str) -> Callable[..., str]:
 
 
 def _resolve_renderer_path(block_type: str) -> Path:
-    """根据 json:类型 按命名约定查找同目录下的渲染脚本。"""
-    script_path = Path(__file__).with_name(f"{TEMPLATE_STYLE}_{block_type}.py").resolve()
-    if script_path.exists():
-        return script_path
+    """根据 json:类型 通过配置文件映射查找同目录下的渲染脚本。"""
+    config_path, renderer_scripts = _load_renderer_scripts()
+    script_name = renderer_scripts.get(block_type)
+    if script_name is None:
+        supported_text = ", ".join(sorted(renderer_scripts)) if renderer_scripts else "none"
+        raise ValueError(f"Unsupported json table type '{block_type}'. Supported types: {supported_text}.")
 
-    current_prefix = f"{TEMPLATE_STYLE}_"
-    supported = sorted(
-        path.stem.removeprefix(current_prefix)
-        for path in Path(__file__).parent.glob(f"{current_prefix}*.py")
-        if path.stem != Path(__file__).stem
-    )
+    config_relative_path = (config_path.parent / script_name).resolve()
+    if config_relative_path.exists():
+        return config_relative_path
+
+    internal_script_path = (Path(__file__).resolve().parent / Path(script_name).name).resolve()
+    if internal_script_path.exists():
+        return internal_script_path
+
+    supported = sorted(renderer_scripts)
     supported_text = ", ".join(supported) if supported else "none"
-    raise ValueError(f"Unsupported json table type '{block_type}'. Supported types: {supported_text}.")
+    raise ValueError(
+        f"Renderer script '{script_name}' for json:{block_type} was not found relative to '{config_path.parent}'. "
+        f"Supported types: {supported_text}.",
+    )
+
+
+def _load_renderer_scripts() -> tuple[Path, dict[str, str]]:
+    """从 JSON 配置文件读取 design_doc 的表格类型到脚本名映射。"""
+    config_path = _resolve_renderer_config_path()
+
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Renderer config file '{config_path.name}' is invalid: {exc.msg}.") from exc
+
+    scripts = data.get("renderers", {})
+    if not isinstance(scripts, dict):
+        raise ValueError(f"Renderer config file '{config_path.name}' must define a 'renderers' object.")
+
+    normalized_scripts: dict[str, str] = {}
+    for block_type, script_name in scripts.items():
+        if isinstance(block_type, str) and isinstance(script_name, str):
+            normalized_block_type = block_type.strip()
+            normalized_script_name = script_name.strip()
+            if normalized_block_type and normalized_script_name:
+                normalized_scripts[normalized_block_type] = normalized_script_name
+
+    if not normalized_scripts:
+        raise ValueError(
+            f"Renderer config file '{config_path.name}' must define at least one renderer mapping.",
+        )
+    return config_path, normalized_scripts
+
+
+def _resolve_renderer_config_path() -> Path:
+    """优先读取外部 config.json，便于 exe 同目录下直接替换或扩展脚本映射。"""
+    exe_root = executable_root()
+    candidates = [
+        exe_root / PRIMARY_RENDERER_CONFIG_FILE if exe_root is not None else None,
+        _context_project_root() / PRIMARY_RENDERER_CONFIG_FILE if _context_project_root() is not None else None,
+        Path(__file__).resolve().with_name(PRIMARY_RENDERER_CONFIG_FILE),
+        Path(__file__).resolve().with_name(LEGACY_RENDERER_CONFIG_FILE),
+    ]
+    for candidate in candidates:
+        if candidate is not None and candidate.exists():
+            return candidate.resolve()
+
+    expected_names = ", ".join(f"'{name}'" for name in (PRIMARY_RENDERER_CONFIG_FILE, LEGACY_RENDERER_CONFIG_FILE))
+    raise ValueError(f"Renderer config file was not found. Expected one of: {expected_names}.")
+
+
+def _context_project_root() -> Path | None:
+    """同名脚本被 companion 调用时，优先用 project_root 作为外部配置基准目录。"""
+    project_root = _CURRENT_CONTEXT.get("project_root")
+    if not isinstance(project_root, str) or not project_root.strip():
+        return None
+    return Path(project_root).resolve()
 
 
 def _render_markdown_lines_as_html(lines: list[str], table_placeholders: dict[str, str]) -> str:
